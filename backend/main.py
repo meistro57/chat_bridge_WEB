@@ -247,12 +247,14 @@ class PersonaManager:
         self.script_dir = BASE_DIR
         self.roles_path = self.script_dir / "roles.json"
         self.persona_library: Dict[str, PersonaConfig] = {}
+        self.roles_mtime: Optional[float] = None
 
     def load_personas_from_config(self) -> Dict[str, PersonaConfig]:
         """Load persona configurations from roles.json with robust error handling"""
         try:
             if not self.roles_path.exists():
                 logger.warning(f"roles.json not found at {self.roles_path}, starting with empty persona library")
+                self.roles_mtime = None
                 return {}
 
             with open(self.roles_path, 'r', encoding='utf-8') as f:
@@ -276,6 +278,11 @@ class PersonaManager:
                         logger.warning(f"Failed to load persona {key}: {e}")
 
             logger.info(f"Loaded {len(personas)} personas from roles.json")
+            try:
+                self.roles_mtime = self.roles_path.stat().st_mtime
+            except OSError as exc:
+                logger.warning(f"Unable to stat roles.json for mtime tracking: {exc}")
+                self.roles_mtime = None
             return personas
 
         except json.JSONDecodeError as e:
@@ -325,6 +332,22 @@ class PersonaManager:
         """Get a specific persona by key"""
         return self.persona_library.get(persona_key)
 
+    def refresh_from_disk(self) -> None:
+        """Reload personas if roles.json has changed on disk."""
+        try:
+            if not self.roles_path.exists():
+                if self.persona_library:
+                    logger.warning("roles.json missing; clearing in-memory personas.")
+                self.persona_library = {}
+                self.roles_mtime = None
+                return
+
+            current_mtime = self.roles_path.stat().st_mtime
+            if self.roles_mtime is None or current_mtime > self.roles_mtime:
+                self.persona_library = self.load_personas_from_config()
+        except OSError as exc:
+            logger.warning(f"Unable to refresh personas from roles.json: {exc}")
+
     def get_persona_detail(self, persona_key: str) -> Optional[Dict[str, Any]]:
         """Get persona configuration detail for management UI."""
         persona = self.persona_library.get(persona_key)
@@ -356,6 +379,10 @@ class PersonaManager:
         roles_data["persona_library"][persona_key] = self._serialize_persona(persona)
         self._write_roles_data(roles_data)
         self.persona_library[persona_key] = persona
+        try:
+            self.roles_mtime = self.roles_path.stat().st_mtime
+        except OSError as exc:
+            logger.warning(f"Unable to update roles.json mtime after upsert: {exc}")
 
     def delete_persona(self, persona_key: str) -> None:
         """Delete a persona from roles.json and memory."""
@@ -366,6 +393,10 @@ class PersonaManager:
             roles_data["persona_library"] = persona_library
             self._write_roles_data(roles_data)
         self.persona_library.pop(persona_key, None)
+        try:
+            self.roles_mtime = self.roles_path.stat().st_mtime
+        except OSError as exc:
+            logger.warning(f"Unable to update roles.json mtime after delete: {exc}")
 
     def get_available_personas(self) -> Dict[str, Dict]:
         """Get available personas in API format - personas are provider-agnostic"""
@@ -509,23 +540,19 @@ async def persist_api_keys(request: PersistKeysRequest):
 @app.get("/api/personas")
 async def get_personas():
     """Get available persona configurations"""
-    # Ensure personas are loaded if not already
-    if not persona_manager.persona_library:
-        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona_manager.refresh_from_disk()
     return {"personas": list(persona_manager.get_available_personas().values())}
 
 @app.get("/api/persona-manager")
 async def list_persona_manager():
     """List personas for management UI."""
-    if not persona_manager.persona_library:
-        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona_manager.refresh_from_disk()
     return {"personas": persona_manager.list_persona_details()}
 
 @app.get("/api/persona-manager/{persona_id}")
 async def get_persona_manager(persona_id: str):
     """Get a single persona definition."""
-    if not persona_manager.persona_library:
-        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona_manager.refresh_from_disk()
     persona = persona_manager.get_persona_detail(persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
@@ -535,8 +562,7 @@ async def get_persona_manager(persona_id: str):
 async def create_persona_manager(request: PersonaManagementRequest):
     """Create a new persona entry."""
     _validate_persona_id(request.id)
-    if not persona_manager.persona_library:
-        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona_manager.refresh_from_disk()
     if request.id in persona_manager.persona_library:
         raise HTTPException(status_code=409, detail="Persona ID already exists")
     persona_config = PersonaConfig(
@@ -555,8 +581,7 @@ async def create_persona_manager(request: PersonaManagementRequest):
 async def update_persona_manager(persona_id: str, request: PersonaManagementRequest):
     """Update an existing persona entry."""
     _validate_persona_id(persona_id)
-    if not persona_manager.persona_library:
-        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona_manager.refresh_from_disk()
     if persona_id not in persona_manager.persona_library:
         raise HTTPException(status_code=404, detail="Persona not found")
     if request.id != persona_id:
@@ -577,8 +602,7 @@ async def update_persona_manager(persona_id: str, request: PersonaManagementRequ
 async def delete_persona_manager(persona_id: str):
     """Delete a persona entry."""
     _validate_persona_id(persona_id)
-    if not persona_manager.persona_library:
-        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona_manager.refresh_from_disk()
     if persona_id not in persona_manager.persona_library:
         raise HTTPException(status_code=404, detail="Persona not found")
     persona_manager.delete_persona(persona_id)
