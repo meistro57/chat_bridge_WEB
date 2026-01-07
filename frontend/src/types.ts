@@ -1,3 +1,4 @@
+// types.ts
 // Type definitions for the chat bridge
 
 export interface Persona {
@@ -5,6 +6,17 @@ export interface Persona {
   name: string;
   description?: string;
   system_preview?: string;
+}
+
+export interface PersonaDetail {
+  id: string;
+  name: string;
+  provider: string;
+  system_prompt: string;
+  temperature?: number;
+  model?: string | null;
+  guidelines: string[];
+  notes?: string | null;
 }
 
 export interface Message {
