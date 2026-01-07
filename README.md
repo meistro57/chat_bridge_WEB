@@ -54,6 +54,16 @@ chat_bridge_WEB/
 └── AGENTS.md           # Technical guide for AI agents
 ```
 
+## 🏷️ Tags
+
+Use these tags to quickly locate common workflows and scripts:
+
+- `tests:integration` → `backend/tests/integration_test.py`
+- `tests:smoke` → `smoke_test.py`
+- `dev:fullstack` → `dev_start.sh`
+- `dev:backend` → `launcher.py`
+- `dev:frontend` → `frontend/` (`npm run dev`)
+
 ## 🧪 Testing
 
 ### Backend Integration Tests
