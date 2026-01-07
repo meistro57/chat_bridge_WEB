@@ -171,6 +171,8 @@ const RetroChatBridge = () => {
   const [modelsB, setModelsB] = useState<Model[]>([]);
   const [isLoadingModelsA, setIsLoadingModelsA] = useState(false);
   const [isLoadingModelsB, setIsLoadingModelsB] = useState(false);
+  const [personaModels, setPersonaModels] = useState<Model[]>([]);
+  const [isLoadingPersonaModels, setIsLoadingPersonaModels] = useState(false);
   const [maxRounds, setMaxRounds] = useState(24);
   const [temperatureA, setTemperatureA] = useState(0.7);
   const [temperatureB, setTemperatureB] = useState(0.7);
@@ -221,6 +223,14 @@ const RetroChatBridge = () => {
 
   const [providerStatus, setProviderStatus] = useState<Record<string, any>>({});
   const [isLoadingProviderStatus, setIsLoadingProviderStatus] = useState(true);
+
+  const personaModelOptions = useMemo(() => {
+    const options = [...personaModels];
+    if (personaForm.model && !personaModels.some((model) => model.id === personaForm.model)) {
+      options.push({ id: personaForm.model, name: `${personaForm.model} (custom)` });
+    }
+    return options;
+  }, [personaForm.model, personaModels]);
 
   const fetchProviderStatus = useCallback(async () => {
     setIsLoadingProviderStatus(true);
@@ -465,6 +475,23 @@ const RetroChatBridge = () => {
     }
   };
 
+  const fetchPersonaModels = useCallback(async (provider: string) => {
+    setIsLoadingPersonaModels(true);
+    try {
+      const response = await fetch(`/api/models?provider=${provider}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models for ${provider}`);
+      }
+      const data = await response.json();
+      setPersonaModels(data.models ?? []);
+    } catch (error) {
+      console.error('Failed to fetch persona models:', error);
+      setPersonaModels([]);
+    } finally {
+      setIsLoadingPersonaModels(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchModels(selectedProviderA, true);
   }, [selectedProviderA]);
@@ -472,6 +499,10 @@ const RetroChatBridge = () => {
   useEffect(() => {
     fetchModels(selectedProviderB, false);
   }, [selectedProviderB]);
+
+  useEffect(() => {
+    fetchPersonaModels(personaForm.provider);
+  }, [fetchPersonaModels, personaForm.provider]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -1180,7 +1211,10 @@ const RetroChatBridge = () => {
                       <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Provider</span>
                       <select
                         value={personaForm.provider}
-                        onChange={(event) => setPersonaForm({ ...personaForm, provider: event.target.value })}
+                        onChange={(event) => {
+                          const nextProvider = event.target.value;
+                          setPersonaForm({ ...personaForm, provider: nextProvider, model: null });
+                        }}
                         className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
                       >
                         {PROVIDER_OPTIONS.map((option) => (
@@ -1192,13 +1226,27 @@ const RetroChatBridge = () => {
                     </label>
                     <label className="flex flex-col gap-1 text-sm text-win-gray-600">
                       <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Model (optional)</span>
-                      <input
-                        type="text"
+                      <select
                         value={personaForm.model ?? ''}
-                        onChange={(event) => setPersonaForm({ ...personaForm, model: event.target.value })}
-                        placeholder="Leave blank for default"
-                        className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
-                      />
+                        onChange={(event) =>
+                          setPersonaForm({ ...personaForm, model: event.target.value ? event.target.value : null })
+                        }
+                        disabled={isLoadingPersonaModels || personaModelOptions.length === 0}
+                        className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none disabled:opacity-60"
+                      >
+                        <option value="">Use provider default</option>
+                        {isLoadingPersonaModels ? (
+                          <option>Loading models...</option>
+                        ) : personaModelOptions.length === 0 ? (
+                          <option>No models available</option>
+                        ) : (
+                          personaModelOptions.map((model) => (
+                            <option key={model.id} value={model.id} className="bg-win-gray-100 text-win-gray-800">
+                              {model.name}
+                            </option>
+                          ))
+                        )}
+                      </select>
                     </label>
                   </div>
                   <label className="flex flex-col gap-1 text-sm text-win-gray-600">
