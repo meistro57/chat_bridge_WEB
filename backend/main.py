@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# main.py
 """
 Chat Bridge Web API Backend
 FastAPI server providing RESTful API for the Chat Bridge web interface.
@@ -15,11 +16,13 @@ from datetime import datetime
 import asyncio
 import logging
 import re
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 import httpx
 
+BASE_DIR = Path(__file__).parent.parent.parent.resolve()
+
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 # Import Chat Bridge functionality
 import sys
@@ -55,6 +58,7 @@ class PersonaConfig(BaseModel):
     temperature: Optional[float] = 0.7
     model: Optional[str] = None
     guidelines: Optional[List[str]] = []
+    notes: Optional[str] = None
 
 class ConversationRequest(BaseModel):
     persona_a: Optional[str] = None
@@ -69,6 +73,19 @@ class ConversationRequest(BaseModel):
     temperature_a: float = 0.7
     temperature_b: float = 0.7
     api_keys: Optional[Dict[str, str]] = {}
+
+class PersistKeysRequest(BaseModel):
+    api_keys: Dict[str, str] = {}
+
+class PersonaManagementRequest(BaseModel):
+    id: str
+    name: str
+    provider: str
+    system_prompt: str
+    temperature: Optional[float] = 0.7
+    model: Optional[str] = None
+    guidelines: List[str] = []
+    notes: Optional[str] = None
 
 class Message(BaseModel):
     content: str
@@ -227,19 +244,18 @@ class PersonaManager:
     """Manages roles and personalities configuration"""
 
     def __init__(self):
-        self.script_dir = Path(__file__).parent.parent.parent.resolve()
+        self.script_dir = BASE_DIR
+        self.roles_path = self.script_dir / "roles.json"
         self.persona_library: Dict[str, PersonaConfig] = {}
 
     def load_personas_from_config(self) -> Dict[str, PersonaConfig]:
         """Load persona configurations from roles.json with robust error handling"""
         try:
-            roles_path = self.script_dir / "roles.json"
-
-            if not roles_path.exists():
-                logger.warning(f"roles.json not found at {roles_path}, starting with empty persona library")
+            if not self.roles_path.exists():
+                logger.warning(f"roles.json not found at {self.roles_path}, starting with empty persona library")
                 return {}
 
-            with open(roles_path, 'r', encoding='utf-8') as f:
+            with open(self.roles_path, 'r', encoding='utf-8') as f:
                 roles_data = json.load(f)
 
             personas = {}
@@ -252,7 +268,8 @@ class PersonaManager:
                             system_prompt=persona_data.get('system', ''),
                             temperature=persona_data.get('temperature', 0.7),
                             model=persona_data.get('model'),
-                            guidelines=persona_data.get('guidelines', [])
+                            guidelines=persona_data.get('guidelines', []),
+                            notes=persona_data.get('notes')
                         )
                         personas[key] = persona_config
                     except Exception as e:
@@ -268,9 +285,87 @@ class PersonaManager:
             logger.error(f"Error loading persona configurations: {e}")
             return {}
 
+    def _load_roles_data(self) -> Dict[str, Any]:
+        """Load full roles.json data for updates."""
+        if not self.roles_path.exists():
+            return {"persona_library": {}}
+        try:
+            with open(self.roles_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}")
+            return {"persona_library": {}}
+        except Exception as e:
+            logger.error(f"Error loading roles.json: {e}")
+            return {"persona_library": {}}
+
+    def _write_roles_data(self, roles_data: Dict[str, Any]) -> None:
+        """Persist roles.json updates to disk."""
+        try:
+            with open(self.roles_path, 'w', encoding='utf-8') as f:
+                json.dump(roles_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to write roles.json: {e}")
+            raise
+
+    def _serialize_persona(self, persona: PersonaConfig) -> Dict[str, Any]:
+        """Serialize PersonaConfig to roles.json schema."""
+        payload: Dict[str, Any] = {
+            "provider": persona.provider,
+            "model": persona.model,
+            "system": persona.system_prompt,
+            "guidelines": persona.guidelines,
+            "name": persona.name,
+        }
+        if persona.notes:
+            payload["notes"] = persona.notes
+        return payload
+
     def get_persona(self, persona_key: str) -> Optional[PersonaConfig]:
         """Get a specific persona by key"""
         return self.persona_library.get(persona_key)
+
+    def get_persona_detail(self, persona_key: str) -> Optional[Dict[str, Any]]:
+        """Get persona configuration detail for management UI."""
+        persona = self.persona_library.get(persona_key)
+        if not persona:
+            return None
+        return {
+            "id": persona_key,
+            "name": persona.name,
+            "provider": persona.provider,
+            "system_prompt": persona.system_prompt,
+            "temperature": persona.temperature,
+            "model": persona.model,
+            "guidelines": persona.guidelines,
+            "notes": persona.notes,
+        }
+
+    def list_persona_details(self) -> List[Dict[str, Any]]:
+        """List persona details for management UI."""
+        return [
+            self.get_persona_detail(key)
+            for key in sorted(self.persona_library.keys())
+            if self.get_persona_detail(key)
+        ]
+
+    def upsert_persona(self, persona_key: str, persona: PersonaConfig) -> None:
+        """Add or update a persona and persist to roles.json."""
+        roles_data = self._load_roles_data()
+        roles_data.setdefault("persona_library", {})
+        roles_data["persona_library"][persona_key] = self._serialize_persona(persona)
+        self._write_roles_data(roles_data)
+        self.persona_library[persona_key] = persona
+
+    def delete_persona(self, persona_key: str) -> None:
+        """Delete a persona from roles.json and memory."""
+        roles_data = self._load_roles_data()
+        persona_library = roles_data.get("persona_library", {})
+        if persona_key in persona_library:
+            del persona_library[persona_key]
+            roles_data["persona_library"] = persona_library
+            self._write_roles_data(roles_data)
+        self.persona_library.pop(persona_key, None)
 
     def get_available_personas(self) -> Dict[str, Dict]:
         """Get available personas in API format - personas are provider-agnostic"""
@@ -290,6 +385,33 @@ class PersonaManager:
 # Global state (in production, use Redis or database)
 conversations: Dict[str, Conversation] = {}
 persona_manager = PersonaManager()
+
+def _persist_api_keys(api_keys: Dict[str, str]) -> Dict[str, str]:
+    """Persist API keys to the .env file and update the process environment."""
+    dotenv_path = BASE_DIR / ".env"
+    saved: Dict[str, str] = {}
+    for provider, key in api_keys.items():
+        if not key or not key.strip():
+            continue
+        try:
+            spec = get_spec(provider)
+            if not spec.key_env:
+                continue
+            sanitized_key = key.strip()
+            os.environ[spec.key_env] = sanitized_key
+            set_key(str(dotenv_path), spec.key_env, sanitized_key)
+            saved[provider] = spec.key_env
+        except Exception as e:
+            logger.warning(f"Failed to persist key for {provider}: {e}")
+    return saved
+
+def _validate_persona_id(persona_id: str) -> None:
+    """Ensure persona IDs are filesystem-friendly and predictable."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", persona_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Persona ID must contain only letters, numbers, hyphens, or underscores.",
+        )
 
 @app.on_event("startup")
 async def startup_event():
@@ -376,6 +498,14 @@ async def get_provider_status(request: Optional[Dict[str, Any]] = None):
 
     return {"providers": provider_status}
 
+@app.post("/api/api-keys/persist")
+async def persist_api_keys(request: PersistKeysRequest):
+    """Persist API keys to .env for future sessions."""
+    saved = _persist_api_keys(request.api_keys)
+    if not saved:
+        raise HTTPException(status_code=400, detail="No valid API keys provided to persist.")
+    return {"saved": saved}
+
 @app.get("/api/personas")
 async def get_personas():
     """Get available persona configurations"""
@@ -383,6 +513,76 @@ async def get_personas():
     if not persona_manager.persona_library:
         persona_manager.persona_library = persona_manager.load_personas_from_config()
     return {"personas": list(persona_manager.get_available_personas().values())}
+
+@app.get("/api/persona-manager")
+async def list_persona_manager():
+    """List personas for management UI."""
+    if not persona_manager.persona_library:
+        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    return {"personas": persona_manager.list_persona_details()}
+
+@app.get("/api/persona-manager/{persona_id}")
+async def get_persona_manager(persona_id: str):
+    """Get a single persona definition."""
+    if not persona_manager.persona_library:
+        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    persona = persona_manager.get_persona_detail(persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    return persona
+
+@app.post("/api/persona-manager")
+async def create_persona_manager(request: PersonaManagementRequest):
+    """Create a new persona entry."""
+    _validate_persona_id(request.id)
+    if not persona_manager.persona_library:
+        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    if request.id in persona_manager.persona_library:
+        raise HTTPException(status_code=409, detail="Persona ID already exists")
+    persona_config = PersonaConfig(
+        name=request.name or request.id,
+        provider=request.provider,
+        system_prompt=request.system_prompt,
+        temperature=request.temperature if request.temperature is not None else 0.7,
+        model=request.model,
+        guidelines=request.guidelines,
+        notes=request.notes,
+    )
+    persona_manager.upsert_persona(request.id, persona_config)
+    return {"status": "created", "persona": persona_manager.get_persona_detail(request.id)}
+
+@app.put("/api/persona-manager/{persona_id}")
+async def update_persona_manager(persona_id: str, request: PersonaManagementRequest):
+    """Update an existing persona entry."""
+    _validate_persona_id(persona_id)
+    if not persona_manager.persona_library:
+        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    if persona_id not in persona_manager.persona_library:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    if request.id != persona_id:
+        raise HTTPException(status_code=400, detail="Persona ID mismatch between path and payload")
+    persona_config = PersonaConfig(
+        name=request.name or persona_id,
+        provider=request.provider,
+        system_prompt=request.system_prompt,
+        temperature=request.temperature if request.temperature is not None else 0.7,
+        model=request.model,
+        guidelines=request.guidelines,
+        notes=request.notes,
+    )
+    persona_manager.upsert_persona(persona_id, persona_config)
+    return {"status": "updated", "persona": persona_manager.get_persona_detail(persona_id)}
+
+@app.delete("/api/persona-manager/{persona_id}")
+async def delete_persona_manager(persona_id: str):
+    """Delete a persona entry."""
+    _validate_persona_id(persona_id)
+    if not persona_manager.persona_library:
+        persona_manager.persona_library = persona_manager.load_personas_from_config()
+    if persona_id not in persona_manager.persona_library:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    persona_manager.delete_persona(persona_id)
+    return {"status": "deleted", "persona_id": persona_id}
 
 @app.post("/api/conversations", response_model=dict)
 async def create_conversation(request: ConversationRequest):

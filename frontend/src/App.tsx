@@ -1,13 +1,13 @@
-// App.tsx - Retro Theme
+// App.tsx
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import type { Persona, Message, Model, Guide, GuideContent } from './types';
+import type { Persona, PersonaDetail, Message, Model, Guide, GuideContent } from './types';
 
 interface BannerState {
   type: 'info' | 'success' | 'warning' | 'error';
   message: string;
 }
 
-type ModalType = 'agentA' | 'agentB' | 'guides' | 'settings' | null;
+type ModalType = 'agentA' | 'agentB' | 'guides' | 'settings' | 'personas' | null;
 
 type ConversationStatus = 'idle' | 'configuring' | 'running' | 'finished' | 'error';
 
@@ -182,6 +182,21 @@ const RetroChatBridge = () => {
   const [banner, setBanner] = useState<BannerState | null>(null);
 
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [persistKeys, setPersistKeys] = useState(false);
+  const [isSavingKeys, setIsSavingKeys] = useState(false);
+  const [personaManagerEntries, setPersonaManagerEntries] = useState<PersonaDetail[]>([]);
+  const [isLoadingPersonaManager, setIsLoadingPersonaManager] = useState(false);
+  const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
+  const [personaForm, setPersonaForm] = useState<PersonaDetail>({
+    id: '',
+    name: '',
+    provider: PROVIDER_OPTIONS[0]?.value ?? 'openai',
+    system_prompt: '',
+    temperature: 0.7,
+    model: null,
+    guidelines: [],
+    notes: null,
+  });
 
   // Enhanced UX state variables
   const [autoScroll] = useState(true);
@@ -233,6 +248,34 @@ const RetroChatBridge = () => {
     }
   }, [apiKeys]);
 
+  const persistApiKeys = useCallback(async (): Promise<boolean> => {
+    const hasKeys = Object.values(apiKeys).some((key) => key.trim().length > 0);
+    if (!hasKeys) {
+      setBanner({ type: 'warning', message: 'Add at least one API key before saving.' });
+      return false;
+    }
+    setIsSavingKeys(true);
+    try {
+      const response = await fetch('/api/api-keys/persist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_keys: apiKeys }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail ?? 'Failed to persist API keys');
+      }
+      setBanner({ type: 'success', message: 'API keys saved to .env for future sessions.' });
+      return true;
+    } catch (error) {
+      console.error('Failed to persist API keys:', error);
+      setBanner({ type: 'error', message: 'Unable to save API keys.' });
+      return false;
+    } finally {
+      setIsSavingKeys(false);
+    }
+  }, [apiKeys]);
+
   const fetchGuides = async () => {
     try {
       const response = await fetch('/api/guides');
@@ -263,6 +306,129 @@ const RetroChatBridge = () => {
       setIsLoadingGuide(false);
     }
   };
+
+  const fetchPersonas = useCallback(async () => {
+    setIsLoadingPersonas(true);
+    try {
+      const response = await fetch('/api/personas');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch personas: ${response.status}`);
+      }
+      const data = await response.json();
+      setPersonas(data.personas ?? []);
+    } catch (error) {
+      console.error('Failed to fetch personas:', error);
+      setPersonas([]);
+    } finally {
+      setIsLoadingPersonas(false);
+    }
+  }, []);
+
+  const fetchPersonaManager = useCallback(async () => {
+    setIsLoadingPersonaManager(true);
+    try {
+      const response = await fetch('/api/persona-manager');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch persona manager: ${response.status}`);
+      }
+      const data = await response.json();
+      setPersonaManagerEntries(data.personas ?? []);
+    } catch (error) {
+      console.error('Failed to fetch persona manager:', error);
+      setPersonaManagerEntries([]);
+      setBanner({ type: 'error', message: 'Failed to load persona manager' });
+    } finally {
+      setIsLoadingPersonaManager(false);
+    }
+  }, []);
+
+  const resetPersonaForm = useCallback(() => {
+    setActivePersonaId(null);
+    setPersonaForm({
+      id: '',
+      name: '',
+      provider: PROVIDER_OPTIONS[0]?.value ?? 'openai',
+      system_prompt: '',
+      temperature: 0.7,
+      model: null,
+      guidelines: [],
+      notes: null,
+    });
+  }, []);
+
+  const selectPersonaForEdit = useCallback((persona: PersonaDetail) => {
+    setActivePersonaId(persona.id);
+    setPersonaForm({
+      ...persona,
+      model: persona.model ?? null,
+      notes: persona.notes ?? null,
+      temperature: persona.temperature ?? 0.7,
+    });
+  }, []);
+
+  const savePersona = useCallback(async () => {
+    const trimmedId = activePersonaId ?? personaForm.id.trim();
+    if (!trimmedId) {
+      setBanner({ type: 'warning', message: 'Persona ID is required.' });
+      return;
+    }
+
+    const payload: PersonaDetail = {
+      ...personaForm,
+      id: trimmedId,
+      name: personaForm.name.trim() || trimmedId,
+      model: personaForm.model?.trim() ? personaForm.model : null,
+      temperature: personaForm.temperature ?? 0.7,
+      guidelines: personaForm.guidelines.filter((line) => line.trim().length > 0),
+      notes: personaForm.notes?.trim() ? personaForm.notes : null,
+    };
+
+    const isEditing = Boolean(activePersonaId);
+    const url = isEditing ? `/api/persona-manager/${activePersonaId}` : '/api/persona-manager';
+    const method = isEditing ? 'PUT' : 'POST';
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail ?? 'Failed to save persona');
+      }
+      await fetchPersonaManager();
+      await fetchPersonas();
+      setBanner({ type: 'success', message: `Persona ${isEditing ? 'updated' : 'created'} successfully.` });
+      if (!isEditing) {
+        resetPersonaForm();
+      }
+    } catch (error) {
+      console.error('Failed to save persona:', error);
+      setBanner({ type: 'error', message: 'Failed to save persona.' });
+    }
+  }, [activePersonaId, fetchPersonaManager, fetchPersonas, personaForm, resetPersonaForm]);
+
+  const deletePersona = useCallback(async () => {
+    if (!activePersonaId) {
+      setBanner({ type: 'warning', message: 'Select a persona to delete.' });
+      return;
+    }
+    try {
+      const response = await fetch(`/api/persona-manager/${activePersonaId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail ?? 'Failed to delete persona');
+      }
+      await fetchPersonaManager();
+      await fetchPersonas();
+      resetPersonaForm();
+      setBanner({ type: 'success', message: 'Persona deleted.' });
+    } catch (error) {
+      console.error('Failed to delete persona:', error);
+      setBanner({ type: 'error', message: 'Failed to delete persona.' });
+    }
+  }, [activePersonaId, fetchPersonaManager, fetchPersonas, resetPersonaForm]);
 
   const fetchModels = async (provider: string, isAgentA: boolean) => {
     if (isAgentA) {
@@ -404,32 +570,14 @@ const RetroChatBridge = () => {
     setModalType(null);
     setPersonaSearchTerm('');
     setSelectedGuide(null);
-  }, [modalType, apiKeys]);
+    resetPersonaForm();
+  }, [fetchProviderStatus, modalType, resetPersonaForm]);
 
   useEffect(() => {
     fetchProviderStatus();
     fetchGuides();
-
-    // Fetch personas
-    const fetchPersonas = async () => {
-      setIsLoadingPersonas(true);
-      try {
-        const response = await fetch('/api/personas');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch personas: ${response.status}`);
-        }
-        const data = await response.json();
-        setPersonas(data.personas ?? []);
-      } catch (error) {
-        console.error('Failed to fetch personas:', error);
-        setPersonas([]);
-      } finally {
-        setIsLoadingPersonas(false);
-      }
-    };
-
     fetchPersonas();
-  }, []);
+  }, [fetchPersonas, fetchProviderStatus]);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -445,6 +593,12 @@ const RetroChatBridge = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [closeModal, isModalOpen]);
+
+  useEffect(() => {
+    if (isModalOpen && modalType === 'personas') {
+      fetchPersonaManager();
+    }
+  }, [fetchPersonaManager, isModalOpen, modalType]);
 
   const filteredPersonas = useMemo(() => {
     if (!personaSearchTerm.trim()) {
@@ -616,6 +770,14 @@ const RetroChatBridge = () => {
                 title="Configure API Keys"
               >
                 🔑 Keys
+              </button>
+              <button
+                type="button"
+                onClick={() => openModal('personas')}
+                className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
+                title="Manage personas in roles.json"
+              >
+                🎭 Personas
               </button>
               {conversationId && (
                 <button
@@ -868,10 +1030,22 @@ const RetroChatBridge = () => {
             <header className="flex items-start justify-between border-b-2 border-win-gray-400 pb-2">
               <div>
                 <h3 className="text-lg font-semibold text-win-gray-800">
-                  {modalType === 'guides' ? '📚 Help & Guides' : modalType === 'settings' ? '🔑 API Configuration' : `Select ${modalType === 'agentA' ? 'Agent A' : 'Agent B'} persona`}
+                  {modalType === 'guides'
+                    ? '📚 Help & Guides'
+                    : modalType === 'settings'
+                      ? '🔑 API Configuration'
+                      : modalType === 'personas'
+                        ? '🎭 Persona Manager'
+                        : `Select ${modalType === 'agentA' ? 'Agent A' : 'Agent B'} persona`}
                 </h3>
                 <p className="text-sm text-win-gray-600">
-                  {modalType === 'guides' ? 'Browse documentation and guides' : modalType === 'settings' ? 'Configure your provider credentials' : 'Browse the persona library and tap to assign.'}
+                  {modalType === 'guides'
+                    ? 'Browse documentation and guides'
+                    : modalType === 'settings'
+                      ? 'Configure your provider credentials'
+                      : modalType === 'personas'
+                        ? 'Create, edit, and curate personas stored in roles.json.'
+                        : 'Browse the persona library and tap to assign.'}
                 </p>
               </div>
               <button
@@ -887,7 +1061,7 @@ const RetroChatBridge = () => {
               // Settings / API Keys modal content
               <div className="flex flex-col gap-4">
                 <p className="text-sm text-win-gray-600">
-                  Enter your API keys for the providers you wish to use. These keys are only stored in memory for the current session.
+                  Enter your API keys for the providers you wish to use. Keys can stay in memory for this session or be saved into a server-side .env file for future sessions.
                 </p>
                 <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
                   {PROVIDER_OPTIONS.filter(opt => !['ollama', 'lmstudio'].includes(opt.value)).map((opt) => (
@@ -903,13 +1077,193 @@ const RetroChatBridge = () => {
                     </label>
                   ))}
                 </div>
+                <label className="flex items-center gap-2 text-sm text-win-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={persistKeys}
+                    onChange={(event) => setPersistKeys(event.target.checked)}
+                    className="h-4 w-4 rounded border-win-gray-400"
+                  />
+                  <span>Store keys in .env for future sessions</span>
+                </label>
+                <p className="text-xs text-win-gray-500">
+                  Manual configuration is also supported: add API keys directly in the server&apos;s <span className="font-semibold">.env</span> file.
+                </p>
                 <div className="flex justify-end pt-2 border-t-2 border-win-gray-400">
                   <button
                     type="button"
-                    onClick={closeModal}
+                    onClick={async () => {
+                      if (persistKeys) {
+                        const persisted = await persistApiKeys();
+                        if (!persisted) {
+                          return;
+                        }
+                      }
+                      closeModal();
+                    }}
+                    className="rounded-lg border-2 border-win-gray-400 bg-winamp-green px-6 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:shadow-md"
+                    disabled={isSavingKeys}
+                  >
+                    {isSavingKeys ? 'Saving…' : 'Save & Close'}
+                  </button>
+                </div>
+              </div>
+            ) : modalType === 'personas' ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-win-gray-600">
+                    Manage the persona library stored in <span className="font-semibold">roles.json</span>. Updates are written immediately.
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600">Persona library</span>
+                    <button
+                      type="button"
+                      onClick={resetPersonaForm}
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-win-gray-600 transition hover:border-win-gray-600 hover:bg-win-gray-300 hover:text-win-gray-800"
+                    >
+                      New Persona
+                    </button>
+                  </div>
+                  <div className="grid max-h-[180px] gap-2 overflow-y-auto pr-2">
+                    {isLoadingPersonaManager && (
+                      <div className="rounded-lg border-2 border-dashed border-win-gray-400 bg-win-gray-200 p-3 text-center text-xs text-win-gray-500">
+                        Loading persona library…
+                      </div>
+                    )}
+                    {!isLoadingPersonaManager && personaManagerEntries.length === 0 && (
+                      <div className="rounded-lg border-2 border-dashed border-win-gray-400 bg-win-gray-200 p-3 text-center text-xs text-win-gray-500">
+                        No personas found.
+                      </div>
+                    )}
+                    {personaManagerEntries.map((persona) => (
+                      <button
+                        key={persona.id}
+                        type="button"
+                        onClick={() => selectPersonaForEdit(persona)}
+                        className={`flex flex-col gap-1 rounded-lg border-2 px-3 py-2 text-left text-xs transition ${
+                          activePersonaId === persona.id
+                            ? 'border-winamp-teal bg-winamp-teal/10 text-win-gray-800 shadow-inner shadow-win-gray-300'
+                            : 'border-win-gray-400 bg-win-gray-100 text-win-gray-600 hover:border-win-gray-600 hover:bg-win-gray-200'
+                        }`}
+                      >
+                        <span className="font-semibold text-sm text-win-gray-800">{persona.name}</span>
+                        <span className="text-xs text-win-gray-500">{persona.id} · {persona.provider}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Persona ID</span>
+                    <input
+                      type="text"
+                      value={activePersonaId ?? personaForm.id}
+                      onChange={(event) => setPersonaForm({ ...personaForm, id: event.target.value })}
+                      disabled={Boolean(activePersonaId)}
+                      placeholder="unique_persona_id"
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none disabled:opacity-60"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Display name</span>
+                    <input
+                      type="text"
+                      value={personaForm.name}
+                      onChange={(event) => setPersonaForm({ ...personaForm, name: event.target.value })}
+                      placeholder="Persona name"
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                      <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Provider</span>
+                      <select
+                        value={personaForm.provider}
+                        onChange={(event) => setPersonaForm({ ...personaForm, provider: event.target.value })}
+                        className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                      >
+                        {PROVIDER_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value} className="bg-win-gray-100 text-win-gray-800">
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                      <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Model (optional)</span>
+                      <input
+                        type="text"
+                        value={personaForm.model ?? ''}
+                        onChange={(event) => setPersonaForm({ ...personaForm, model: event.target.value })}
+                        placeholder="Leave blank for default"
+                        className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Temperature</span>
+                    <input
+                      type="number"
+                      value={personaForm.temperature ?? 0.7}
+                      onChange={(event) => setPersonaForm({ ...personaForm, temperature: Number(event.target.value) })}
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">System prompt</span>
+                    <textarea
+                      value={personaForm.system_prompt}
+                      onChange={(event) => setPersonaForm({ ...personaForm, system_prompt: event.target.value })}
+                      rows={4}
+                      placeholder="Persona system prompt"
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Guidelines (one per line)</span>
+                    <textarea
+                      value={personaForm.guidelines.join('\n')}
+                      onChange={(event) =>
+                        setPersonaForm({
+                          ...personaForm,
+                          guidelines: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean),
+                        })
+                      }
+                      rows={4}
+                      placeholder="One guideline per line"
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm text-win-gray-600">
+                    <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">Notes (optional)</span>
+                    <textarea
+                      value={personaForm.notes ?? ''}
+                      onChange={(event) => setPersonaForm({ ...personaForm, notes: event.target.value })}
+                      rows={2}
+                      placeholder="Optional notes"
+                      className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-col gap-2 border-t-2 border-win-gray-400 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="button"
+                    onClick={deletePersona}
+                    className="rounded-lg border-2 border-win-gray-400 bg-winamp-red/20 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:shadow-md"
+                  >
+                    Delete Persona
+                  </button>
+                  <button
+                    type="button"
+                    onClick={savePersona}
                     className="rounded-lg border-2 border-win-gray-400 bg-winamp-green px-6 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:shadow-md"
                   >
-                    Save & Close
+                    {activePersonaId ? 'Update Persona' : 'Create Persona'}
                   </button>
                 </div>
               </div>
