@@ -1,11 +1,11 @@
-
-import sys
+import json
 import os
+import sys
+import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
-import types
-import json
 
 # Apply the patch logic from launcher.py to ensure tests can run independently
 WEB_ROOT = Path(__file__).parent.parent.parent.resolve()
@@ -19,33 +19,36 @@ mock_bridge = types.SimpleNamespace()
 mock_bridge.create_agent = MagicMock()
 mock_bridge.get_spec = MagicMock()
 spec = types.SimpleNamespace(
-    label="Mock Provider", 
-    description="Mock Provider Description", 
-    needs_key=False, 
-    key_env="MOCK_KEY", 
-    default_system="You are a mock."
+    label="Mock Provider",
+    description="Mock Provider Description",
+    needs_key=False,
+    key_env="MOCK_KEY",
+    default_system="You are a mock.",
 )
 mock_bridge.get_spec.return_value = spec
 mock_bridge.provider_choices = MagicMock(return_value=["openai", "anthropic"])
 mock_bridge.ensure_credentials = MagicMock(return_value="sk-fake-key-1234567890")
 mock_bridge.resolve_model = MagicMock(return_value="fake-model")
 
-sys.modules['bridge_agents'] = mock_bridge
+sys.modules["bridge_agents"] = mock_bridge
 
 # Monkeypatch Starlette/FastAPI mismatch
-import fastapi.applications
-from starlette.middleware import Middleware
-from starlette.middleware.errors import ServerErrorMiddleware
-from starlette.middleware.exceptions import ExceptionMiddleware
-from fastapi.middleware.asyncexitstack import AsyncExitStackMiddleware
+import fastapi.applications  # noqa: E402, I001
+from fastapi.middleware.asyncexitstack import AsyncExitStackMiddleware  # noqa: E402, I001
+from starlette.middleware import Middleware  # noqa: E402, I001
+from starlette.middleware.errors import ServerErrorMiddleware  # noqa: E402, I001
+from starlette.middleware.exceptions import ExceptionMiddleware  # noqa: E402, I001
+
 
 def fixed_build_middleware_stack(self):
     debug = self.debug
     error_handler = None
     exception_handlers = {}
     for key, value in self.exception_handlers.items():
-        if key in (500, Exception): error_handler = value
-        else: exception_handlers[key] = value
+        if key in (500, Exception):
+            error_handler = value
+        else:
+            exception_handlers[key] = value
 
     middleware = (
         [Middleware(ServerErrorMiddleware, handler=error_handler, debug=debug)]
@@ -58,31 +61,49 @@ def fixed_build_middleware_stack(self):
 
     app = self.router
     for m in reversed(middleware):
-        if hasattr(m, "cls"): cls, options = m.cls, m.kwargs
-        elif len(m) == 3: cls, options = m[0], m[2]
-        else: cls, options = m
+        if hasattr(m, "cls"):
+            cls = m.cls
+            options = getattr(m, "kwargs", None) or getattr(m, "options", None) or {}
+        elif len(m) == 3:
+            cls, options = m[0], m[2]
+        else:
+            cls, options = m
         app = cls(app=app, **options)
     return app
+
 
 fastapi.applications.FastAPI.build_middleware_stack = fixed_build_middleware_stack
 
 # Now import the app
-from fastapi.testclient import TestClient
-from backend.main import app
+from fastapi.testclient import TestClient  # noqa: E402, I001
+from backend.main import app  # noqa: E402, I001
+
 
 class BackendIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         # Mock the roles.json file location for PersonaManager
         import backend.main as main
-        main.persona_manager.persona_library = {
-            "test_persona": main.PersonaConfig(
-                name="Test Persona",
-                provider="openai",
-                system_prompt="Test prompt",
-                temperature=0.5
-            )
+
+        self.temp_dir = tempfile.TemporaryDirectory()
+        roles_path = Path(self.temp_dir.name) / "roles.json"
+        roles_payload = {
+            "persona_library": {
+                "test_persona": {
+                    "name": "Test Persona",
+                    "provider": "openai",
+                    "system": "Test prompt",
+                    "temperature": 0.5,
+                }
+            }
         }
+        roles_path.write_text(json.dumps(roles_payload), encoding="utf-8")
+        main.persona_manager.roles_path = roles_path
+        main.persona_manager.roles_mtime = None
+        main.persona_manager.persona_library = main.persona_manager.load_personas_from_config()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
 
     def test_root_health(self):
         response = self.client.get("/")
@@ -109,24 +130,24 @@ class BackendIntegrationTests(unittest.TestCase):
 
     def test_create_conversation_with_keys(self):
         # Test that conversation creation accepts api_keys
-        import os
         provider = "openai"
         key_val = "sk-test-key-1234567890"
-        
+
         payload = {
             "provider_a": provider,
             "provider_b": "anthropic",
             "starter_message": "Hello",
             "max_rounds": 1,
-            "api_keys": {provider: key_val}
+            "api_keys": {provider: key_val},
         }
-        
+
         # We need to mock bridge_agents.ensure_credentials to not fail or check the env
         response = self.client.post("/api/conversations", json=payload)
         self.assertEqual(response.status_code, 200)
-        
+
         # Check if it was injected into os.environ (our mock behavior in main.py)
         from bridge_agents import get_spec
+
         spec = get_spec(provider)
         self.assertEqual(os.environ.get(spec.key_env), key_val)
 
@@ -142,6 +163,7 @@ class BackendIntegrationTests(unittest.TestCase):
         if response.status_code == 200:
             self.assertIn("content", response.json())
             self.assertEqual(response.json()["guide_id"], "getting-started")
+
 
 if __name__ == "__main__":
     unittest.main()
