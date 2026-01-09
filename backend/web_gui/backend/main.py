@@ -4,17 +4,18 @@ Chat Bridge Web API Backend
 FastAPI server providing RESTful API for the Chat Bridge web interface.
 """
 
-from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect
+import asyncio
+import json
+import logging
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, List, Optional
-import json
-import os
-from pathlib import Path
-from datetime import datetime
-import asyncio
-import logging
-import sys
 
 # Add the project root to the Python path before importing
 script_dir = Path(__file__).parent.resolve()
@@ -25,7 +26,13 @@ print(f"DEBUG: sys.path[0]: {sys.path[0]}")  # DEBUG
 print(f"DEBUG: bridge_agents exists: {(project_root / 'bridge_agents.py').exists()}")  # DEBUG
 
 # Import Chat Bridge functionality
-from bridge_agents import create_agent, get_spec, provider_choices, ensure_credentials, resolve_model
+from bridge_agents import (  # noqa: E402, I001
+    create_agent,
+    get_spec,
+    provider_choices,
+    ensure_credentials,
+    resolve_model,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +41,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Chat Bridge Web API",
     description="RESTful API for managing AI agent conversations",
-    version="0.1.0"
+    version="0.1.0",
 )
 
 # Add CORS middleware for web frontend
@@ -46,6 +53,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Data models for API requests
 class PersonaConfig(BaseModel):
     name: str
@@ -54,6 +62,7 @@ class PersonaConfig(BaseModel):
     temperature: Optional[float] = 0.7
     model: Optional[str] = None
     guidelines: Optional[List[str]] = []
+
 
 class ConversationRequest(BaseModel):
     persona_a: Optional[str] = None
@@ -65,11 +74,13 @@ class ConversationRequest(BaseModel):
     temperature_a: float = 0.7
     temperature_b: float = 0.7
 
+
 class Message(BaseModel):
     content: str
     sender: str  # 'user', 'agent_a', 'agent_b'
     timestamp: datetime
     persona: Optional[str] = None
+
 
 class Conversation:
     def __init__(self, request: ConversationRequest):
@@ -115,6 +126,7 @@ class Conversation:
             self.request.provider_b,
         )
 
+
 class PersonaManager:
     """Manages roles and personalities configuration"""
 
@@ -128,23 +140,25 @@ class PersonaManager:
             roles_path = self.script_dir / "roles.json"
 
             if not roles_path.exists():
-                logger.warning(f"roles.json not found at {roles_path}, starting with empty persona library")
+                logger.warning(
+                    f"roles.json not found at {roles_path}, starting with empty persona library"
+                )
                 return {}
 
-            with open(roles_path, 'r', encoding='utf-8') as f:
+            with open(roles_path, "r", encoding="utf-8") as f:
                 roles_data = json.load(f)
 
             personas = {}
-            if 'persona_library' in roles_data:
-                for key, persona_data in roles_data['persona_library'].items():
+            if "persona_library" in roles_data:
+                for key, persona_data in roles_data["persona_library"].items():
                     try:
                         persona_config = PersonaConfig(
-                            name=persona_data.get('name', key),
-                            provider=persona_data.get('provider', 'openai'),
-                            system_prompt=persona_data.get('system', ''),
-                            temperature=persona_data.get('temperature', 0.7),
-                            model=persona_data.get('model'),
-                            guidelines=persona_data.get('guidelines', [])
+                            name=persona_data.get("name", key),
+                            provider=persona_data.get("provider", "openai"),
+                            system_prompt=persona_data.get("system", ""),
+                            temperature=persona_data.get("temperature", 0.7),
+                            model=persona_data.get("model"),
+                            guidelines=persona_data.get("guidelines", []),
                         )
                         personas[key] = persona_config
                     except Exception as e:
@@ -154,7 +168,9 @@ class PersonaManager:
             return personas
 
         except json.JSONDecodeError as e:
-            logger.error(f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}")
+            logger.error(
+                f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}"
+            )
             return {}
         except Exception as e:
             logger.error(f"Error loading persona configurations: {e}")
@@ -171,7 +187,9 @@ class PersonaManager:
             try:
                 spec = get_spec(persona.provider)
             except KeyError:
-                logger.warning("Skipping persona %s due to unknown provider '%s'", key, persona.provider)
+                logger.warning(
+                    "Skipping persona %s due to unknown provider '%s'", key, persona.provider
+                )
                 continue
 
             if spec.needs_key and not os.getenv(spec.key_env or ""):
@@ -188,24 +206,30 @@ class PersonaManager:
                 "name": persona.name,
                 "provider": persona.provider,
                 "description": f"AI persona using {persona.provider}",
-                "system_preview": persona.system_prompt[:100] + "..." if len(persona.system_prompt) > 100 else persona.system_prompt
+                "system_preview": persona.system_prompt[:100] + "..."
+                if len(persona.system_prompt) > 100
+                else persona.system_prompt,
             }
 
         return available
 
+
 # Global state (in production, use Redis or database)
 conversations: Dict[str, Conversation] = {}
 persona_manager = PersonaManager()
+
 
 @app.on_event("startup")
 async def startup_event():
     """Load persona configurations on startup"""
     persona_manager.persona_library = persona_manager.load_personas_from_config()
 
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
     return {"message": "Chat Bridge Web API is running", "version": "0.1.0"}
+
 
 @app.get("/api/providers")
 async def get_providers():
@@ -213,18 +237,16 @@ async def get_providers():
     providers = provider_choices()
     return {
         "providers": [
-            {
-                "key": p.key,
-                "label": p.label,
-                "description": p.description
-            } for p in providers
+            {"key": p.key, "label": p.label, "description": p.description} for p in providers
         ]
     }
+
 
 @app.get("/api/personas")
 async def get_personas():
     """Get available persona configurations"""
     return {"personas": list(persona_manager.get_available_personas().values())}
+
 
 @app.post("/api/conversations", response_model=dict)
 async def create_conversation(request: ConversationRequest):
@@ -242,17 +264,14 @@ async def create_conversation(request: ConversationRequest):
 
         # Add initial user message
         initial_message = Message(
-            content=request.starter_message,
-            sender="user",
-            timestamp=datetime.now(),
-            persona=None
+            content=request.starter_message, sender="user", timestamp=datetime.now(), persona=None
         )
         conversation.messages.append(initial_message)
 
         return {
             "conversation_id": conv_id,
             "status": "created",
-            "starter_message": request.starter_message
+            "starter_message": request.starter_message,
         }
 
     except RuntimeError as e:
@@ -261,6 +280,7 @@ async def create_conversation(request: ConversationRequest):
     except Exception as e:
         logger.error("Failed to create conversation: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
 
 @app.get("/api/conversations/{conversation_id}/transcript")
 async def get_conversation_transcript(conversation_id: str):
@@ -275,28 +295,28 @@ async def get_conversation_transcript(conversation_id: str):
     filename = f"transcript_{conversation_id}_{timestamp}.md"
 
     transcript_lines = [
-        f"# Chat Bridge Conversation Transcript",
-        f"",
+        "# Chat Bridge Conversation Transcript",
+        "",
         f"**Conversation ID:** {conversation_id}",
         f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"**Provider A:** {conversation.request.provider_a}",
         f"**Provider B:** {conversation.request.provider_b}",
         f"**Max Rounds:** {conversation.request.max_rounds}",
-        f"",
-        f"---",
-        f""
+        "",
+        "---",
+        "",
     ]
 
     # Add messages
     for i, msg in enumerate(conversation.messages):
-        sender_label = msg.persona if msg.persona else msg.sender.replace('_', ' ').title()
+        sender_label = msg.persona if msg.persona else msg.sender.replace("_", " ").title()
         transcript_lines.append(f"## Message {i + 1} - {sender_label}")
         transcript_lines.append(f"*{msg.timestamp.strftime('%Y-%m-%d %H:%M:%S')}*")
-        transcript_lines.append(f"")
+        transcript_lines.append("")
         transcript_lines.append(msg.content)
-        transcript_lines.append(f"")
-        transcript_lines.append(f"---")
-        transcript_lines.append(f"")
+        transcript_lines.append("")
+        transcript_lines.append("---")
+        transcript_lines.append("")
 
     transcript = "\n".join(transcript_lines)
 
@@ -304,8 +324,9 @@ async def get_conversation_transcript(conversation_id: str):
         "transcript": transcript,
         "filename": filename,
         "conversation_id": conversation_id,
-        "message_count": len(conversation.messages)
+        "message_count": len(conversation.messages),
     }
+
 
 @app.websocket("/ws/conversations/{conversation_id}")
 async def websocket_conversation(websocket: WebSocket, conversation_id: str):
@@ -324,30 +345,34 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
 
         # Send conversation history
         for msg in conversation.messages:
-            await websocket.send_json({
-                "type": "message",
-                "data": {
-                    "content": msg.content,
-                    "sender": msg.sender,
-                    "timestamp": msg.timestamp.isoformat(),
-                    "persona": msg.persona
+            await websocket.send_json(
+                {
+                    "type": "message",
+                    "data": {
+                        "content": msg.content,
+                        "sender": msg.sender,
+                        "timestamp": msg.timestamp.isoformat(),
+                        "persona": msg.persona,
+                    },
                 }
-            })
+            )
 
         # Start conversation loop
         current_agent = conversation.agent_a
         agent_name = "agent_a"
 
-        while conversation.active and len(conversation.messages) < conversation.request.max_rounds * 2:  # *2 because each round has 2 messages
+        while (
+            conversation.active and len(conversation.messages) < conversation.request.max_rounds * 2
+        ):  # *2 because each round has 2 messages
             try:
                 # Get last message as context
-                context = [msg.content for msg in conversation.messages[-5:]]  # Last 5 messages for context
+                context = [
+                    msg.content for msg in conversation.messages[-5:]
+                ]  # Last 5 messages for context
 
                 # Generate response
                 response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    current_agent.generate_response,
-                    " ".join(context)
+                    None, current_agent.generate_response, " ".join(context)
                 )
 
                 # Create and add message
@@ -355,23 +380,29 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
                     content=response,
                     sender=agent_name,
                     timestamp=datetime.now(),
-                    persona=getattr(conversation.request, f'persona_{agent_name[-1]}', None)
+                    persona=getattr(conversation.request, f"persona_{agent_name[-1]}", None),
                 )
                 conversation.messages.append(message)
 
                 # Send to websocket
-                await websocket.send_json({
-                    "type": "message",
-                    "data": {
-                        "content": response,
-                        "sender": agent_name,
-                        "timestamp": message.timestamp.isoformat(),
-                        "persona": message.persona
+                await websocket.send_json(
+                    {
+                        "type": "message",
+                        "data": {
+                            "content": response,
+                            "sender": agent_name,
+                            "timestamp": message.timestamp.isoformat(),
+                            "persona": message.persona,
+                        },
                     }
-                })
+                )
 
                 # Switch agents
-                current_agent = conversation.agent_b if current_agent == conversation.agent_a else conversation.agent_a
+                current_agent = (
+                    conversation.agent_b
+                    if current_agent == conversation.agent_a
+                    else conversation.agent_a
+                )
                 agent_name = "agent_b" if agent_name == "agent_a" else "agent_a"
 
                 # Small delay to allow streaming effect
@@ -379,10 +410,7 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
 
             except Exception as e:
                 logger.error(f"Error in conversation loop: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "data": str(e)
-                })
+                await websocket.send_json({"type": "error", "data": str(e)})
                 break
 
         # Conversation ended
@@ -393,6 +421,8 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
     except Exception as e:
         logger.error(f"WebSocket error for conversation {conversation_id}: {e}")
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -3,25 +3,30 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
 from fastapi.testclient import TestClient
 
-BACKEND_DIR = (
-    Path(__file__).resolve().parents[1] / "web_gui" / "backend"
-)
+BACKEND_DIR = Path(__file__).resolve().parents[1] / "web_gui" / "backend"
 ROOT_DIR = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT_DIR))
 MAIN_PATH = BACKEND_DIR / "main.py"
 SPEC = importlib.util.spec_from_file_location("web_gui_backend_main", MAIN_PATH)
 main = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader  # Defensive check for loader availability
+bridge_stub = ModuleType("bridge_agents")
+bridge_stub.create_agent = lambda *args, **kwargs: None
+bridge_stub.get_spec = lambda *args, **kwargs: None
+bridge_stub.provider_choices = lambda *args, **kwargs: []
+bridge_stub.ensure_credentials = lambda *args, **kwargs: None
+bridge_stub.resolve_model = lambda *args, **kwargs: None
+sys.modules.setdefault("bridge_agents", bridge_stub)
 SPEC.loader.exec_module(main)  # type: ignore[arg-type]
 
 
@@ -30,11 +35,7 @@ def stub_backend_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) ->
     """Stub external dependencies so tests run in isolation."""
 
     def fake_provider_choices() -> List[SimpleNamespace]:
-        return [
-            SimpleNamespace(
-                key="demo", label="Demo", description="Demonstration provider"
-            )
-        ]
+        return [SimpleNamespace(key="demo", label="Demo", description="Demonstration provider")]
 
     def fake_get_spec(provider: str) -> SimpleNamespace:
         return SimpleNamespace(
@@ -148,9 +149,7 @@ def test_create_conversation_and_transcript(client: TestClient) -> None:
     conversation_id = data["conversation_id"]
     assert conversation_id in main.conversations
 
-    transcript_response = client.get(
-        f"/api/conversations/{conversation_id}/transcript"
-    )
+    transcript_response = client.get(f"/api/conversations/{conversation_id}/transcript")
     assert transcript_response.status_code == 200
     transcript = transcript_response.json()
     assert transcript["conversation_id"] == conversation_id
@@ -168,9 +167,7 @@ def test_websocket_conversation_stream(client: TestClient) -> None:
         "starter_message": "Hello through websocket",
         "max_rounds": 1,
     }
-    conversation_id = client.post("/api/conversations", json=payload).json()[
-        "conversation_id"
-    ]
+    conversation_id = client.post("/api/conversations", json=payload).json()["conversation_id"]
 
     with client.websocket_connect(f"/ws/conversations/{conversation_id}") as websocket:
         received: List[Dict[str, Any]] = []

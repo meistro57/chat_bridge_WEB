@@ -7,6 +7,14 @@ interface BannerState {
   message: string;
 }
 
+interface ProviderStatusEntry {
+  label?: string;
+  connected?: boolean;
+  error?: string;
+}
+
+type ProviderStatusMap = Record<string, ProviderStatusEntry>;
+
 type ModalType = 'agentA' | 'agentB' | 'guides' | 'settings' | 'personas' | null;
 
 type ConversationStatus = 'idle' | 'configuring' | 'running' | 'finished' | 'error';
@@ -118,11 +126,11 @@ const StatusBadge = ({ status }: { status: ConversationStatus }) => (
   </div>
 );
 
-const ProviderStatusIndicator = ({ providerStatus, isLoading }: { providerStatus: Record<string, any>; isLoading: boolean }) => (
+const ProviderStatusIndicator = ({ providerStatus, isLoading }: { providerStatus: ProviderStatusMap; isLoading: boolean }) => (
   <div className="mb-6 rounded-lg border border-win-gray-400 bg-win-gray-200 p-4 shadow-inner shadow-win-gray-500">
     <h3 className="text-sm font-semibold text-win-gray-800 mb-3">Provider Status</h3>
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-      {Object.entries(providerStatus).map(([key, status]: [string, any]) => (
+      {Object.entries(providerStatus).map(([key, status]: [string, ProviderStatusEntry]) => (
         <div key={key} className="flex flex-col items-center gap-1">
           <div className="text-xs text-win-gray-600 uppercase tracking-wide">{status?.label || key}</div>
           <div className="flex items-center gap-2">
@@ -202,7 +210,7 @@ const RetroChatBridge = () => {
   });
 
   // Enhanced UX state variables
-  const [autoScroll] = useState(true);
+  const autoScroll = true;
   const [isTyping, setIsTyping] = useState(false);
 
 
@@ -222,8 +230,9 @@ const RetroChatBridge = () => {
     setIsTyping(false);
   };
 
-  const [providerStatus, setProviderStatus] = useState<Record<string, any>>({});
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusMap>({});
   const [isLoadingProviderStatus, setIsLoadingProviderStatus] = useState(true);
+  const conversationStatusRef = useRef(conversationStatus);
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -273,13 +282,13 @@ const RetroChatBridge = () => {
         throw new Error(`Server responded with ${response.status}`);
       }
       const data = await response.json();
-      setProviderStatus(data.providers ?? {});
+      setProviderStatus((data.providers ?? {}) as ProviderStatusMap);
     } catch (error) {
       console.error('Failed to fetch provider status:', error);
       // Set all providers to disconnected on error
-      const disconnectedStatus: Record<string, any> = {};
-      Object.keys(providerOptions.reduce((acc, opt) => ({ ...acc, [opt.value]: true }), {})).forEach(key => {
-        disconnectedStatus[key] = { connected: false, label: key, error: 'Status check failed' };
+      const disconnectedStatus: ProviderStatusMap = {};
+      providerOptions.forEach((option) => {
+        disconnectedStatus[option.value] = { connected: false, label: option.label, error: 'Status check failed' };
       });
       setProviderStatus(disconnectedStatus);
     } finally {
@@ -629,7 +638,7 @@ const RetroChatBridge = () => {
     ws.onclose = () => {
       console.log('WebSocket closed');
       setIsTyping(false);
-      if (conversationStatus === 'running') {
+      if (conversationStatusRef.current === 'running') {
         setConversationStatus('finished');
       }
     };
@@ -638,7 +647,11 @@ const RetroChatBridge = () => {
       ws.close();
       wsRef.current = null;
     };
-  }, [conversationId]);
+  }, [autoScroll, conversationId]);
+
+  useEffect(() => {
+    conversationStatusRef.current = conversationStatus;
+  }, [conversationStatus]);
 
   useEffect(() => {
     messagesEndRef?.current?.scrollIntoView({ behavior: 'smooth' });

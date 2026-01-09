@@ -5,31 +5,38 @@ Chat Bridge Web API Backend
 FastAPI server providing RESTful API for the Chat Bridge web interface.
 """
 
-from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict
-from typing import Any, Dict, List, Optional
-import json
-import os
-from pathlib import Path
-from datetime import datetime
 import asyncio
+import json
 import logging
+import os
 import re
-from dotenv import load_dotenv, set_key
-import httpx
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-BASE_DIR = Path(__file__).parent.parent.parent.resolve()
+import httpx
+from dotenv import load_dotenv, set_key
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+BASE_DIR = Path(__file__).parent.parent.resolve()
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 # Import Chat Bridge functionality
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.resolve()))
+sys.path.insert(0, str(BASE_DIR))
 
 # Bridge agents imports after path setup
-from bridge_agents import create_agent, get_spec, provider_choices, ensure_credentials, resolve_model
+from bridge_agents import (  # noqa: E402, I001
+    create_agent,
+    get_spec,
+    provider_choices,
+    ensure_credentials,
+    resolve_model,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +45,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Chat Bridge Web API",
     description="RESTful API for managing AI agent conversations",
-    version="1.4.1"
+    version="1.4.1",
 )
 
 # Add CORS middleware for web frontend
@@ -50,6 +57,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Data models for API requests
 class PersonaConfig(BaseModel):
     name: str
@@ -59,6 +67,7 @@ class PersonaConfig(BaseModel):
     model: Optional[str] = None
     guidelines: Optional[List[str]] = []
     notes: Optional[str] = None
+
 
 class ConversationRequest(BaseModel):
     persona_a: Optional[str] = None
@@ -74,8 +83,10 @@ class ConversationRequest(BaseModel):
     temperature_b: float = 0.7
     api_keys: Optional[Dict[str, str]] = {}
 
+
 class PersistKeysRequest(BaseModel):
     api_keys: Dict[str, str] = {}
+
 
 class PersonaManagementRequest(BaseModel):
     id: str
@@ -87,11 +98,13 @@ class PersonaManagementRequest(BaseModel):
     guidelines: List[str] = []
     notes: Optional[str] = None
 
+
 class Message(BaseModel):
     content: str
     sender: str  # 'user', 'agent_a', 'agent_b'
     timestamp: datetime
     persona: Optional[str] = None
+
 
 class Conversation:
     def __init__(self, request: ConversationRequest, conversation_id: str):
@@ -112,17 +125,17 @@ class Conversation:
         slug = re.sub(r"[^\w\s-]", "", self.request.starter_message.lower())[:50]
         slug = re.sub(r"[\s_-]+", "-", slug).strip("-")
         base_name = f"{timestamp}__{slug}"
-        
+
         self.md_path = f"transcripts/{base_name}.md"
         self.log_path = f"logs/{base_name}.log"
-        
+
         os.makedirs("transcripts", exist_ok=True)
         os.makedirs("logs", exist_ok=True)
-        
+
         self.session_logger = logging.getLogger(f"session_{self.conversation_id}")
         self.session_logger.setLevel(logging.INFO)
         self.session_logger.handlers.clear()
-        
+
         handler = logging.FileHandler(self.log_path)
         formatter = logging.Formatter("%(asctime)s - %(message)s")
         handler.setFormatter(formatter)
@@ -155,14 +168,16 @@ class Conversation:
         lines.append(f"**Max Rounds:** {self.request.max_rounds}\n\n")
         lines.append("---\n\n")
         lines.append("## Conversation\n\n")
-        
+
         for i, msg in enumerate(self.messages, 1):
             sender = msg.sender.upper().replace("_", " ")
-            timestamp = msg.timestamp.isoformat() if isinstance(msg.timestamp, datetime) else msg.timestamp
+            timestamp = (
+                msg.timestamp.isoformat() if isinstance(msg.timestamp, datetime) else msg.timestamp
+            )
             lines.append(f"**Round {i}** - {sender} ({timestamp})\n\n")
             lines.append(f"{msg.content}\n\n")
             lines.append("---\n\n")
-        
+
         return "".join(lines)
 
     def initialize_agents(self) -> None:
@@ -190,12 +205,26 @@ class Conversation:
                         logger.warning(f"Could not map provider {provider} to env var: {e}")
 
         # Resolve configurations for Agent A
-        persona_a_config = persona_manager.persona_library.get(self.request.persona_a) if self.request.persona_a else None
+        persona_a_config = (
+            persona_manager.persona_library.get(self.request.persona_a)
+            if self.request.persona_a
+            else None
+        )
         if persona_a_config:
-            provider_a = persona_a_config.provider if persona_a_config.provider else self.request.provider_a
-            temp_a = persona_a_config.temperature if persona_a_config.temperature else self.request.temperature_a
+            provider_a = (
+                persona_a_config.provider if persona_a_config.provider else self.request.provider_a
+            )
+            temp_a = (
+                persona_a_config.temperature
+                if persona_a_config.temperature
+                else self.request.temperature_a
+            )
             model_a = resolve_model(provider_a, persona_a_config.model)
-            system_a = persona_a_config.system_prompt if persona_a_config.system_prompt else get_spec(provider_a).default_system
+            system_a = (
+                persona_a_config.system_prompt
+                if persona_a_config.system_prompt
+                else get_spec(provider_a).default_system
+            )
         else:
             provider_a = self.request.provider_a
             temp_a = self.request.temperature_a
@@ -203,12 +232,26 @@ class Conversation:
             system_a = get_spec(provider_a).default_system
 
         # Resolve configurations for Agent B
-        persona_b_config = persona_manager.persona_library.get(self.request.persona_b) if self.request.persona_b else None
+        persona_b_config = (
+            persona_manager.persona_library.get(self.request.persona_b)
+            if self.request.persona_b
+            else None
+        )
         if persona_b_config:
-            provider_b = persona_b_config.provider if persona_b_config.provider else self.request.provider_b
-            temp_b = persona_b_config.temperature if persona_b_config.temperature else self.request.temperature_b
+            provider_b = (
+                persona_b_config.provider if persona_b_config.provider else self.request.provider_b
+            )
+            temp_b = (
+                persona_b_config.temperature
+                if persona_b_config.temperature
+                else self.request.temperature_b
+            )
             model_b = resolve_model(provider_b, persona_b_config.model)
-            system_b = persona_b_config.system_prompt if persona_b_config.system_prompt else get_spec(provider_b).default_system
+            system_b = (
+                persona_b_config.system_prompt
+                if persona_b_config.system_prompt
+                else get_spec(provider_b).default_system
+            )
         else:
             provider_b = self.request.provider_b
             temp_b = self.request.temperature_b
@@ -240,6 +283,7 @@ class Conversation:
             f"Agents initialized with personas {self.request.persona_a or 'default'} vs {self.request.persona_b or 'default'}"
         )
 
+
 class PersonaManager:
     """Manages roles and personalities configuration"""
 
@@ -253,25 +297,27 @@ class PersonaManager:
         """Load persona configurations from roles.json with robust error handling"""
         try:
             if not self.roles_path.exists():
-                logger.warning(f"roles.json not found at {self.roles_path}, starting with empty persona library")
+                logger.warning(
+                    f"roles.json not found at {self.roles_path}, starting with empty persona library"
+                )
                 self.roles_mtime = None
                 return {}
 
-            with open(self.roles_path, 'r', encoding='utf-8') as f:
+            with open(self.roles_path, "r", encoding="utf-8") as f:
                 roles_data = json.load(f)
 
             personas = {}
-            if 'persona_library' in roles_data:
-                for key, persona_data in roles_data['persona_library'].items():
+            if "persona_library" in roles_data:
+                for key, persona_data in roles_data["persona_library"].items():
                     try:
                         persona_config = PersonaConfig(
-                            name=persona_data.get('name', key),
-                            provider=persona_data.get('provider', 'openai'),
-                            system_prompt=persona_data.get('system', ''),
-                            temperature=persona_data.get('temperature', 0.7),
-                            model=persona_data.get('model'),
-                            guidelines=persona_data.get('guidelines', []),
-                            notes=persona_data.get('notes')
+                            name=persona_data.get("name", key),
+                            provider=persona_data.get("provider", "openai"),
+                            system_prompt=persona_data.get("system", ""),
+                            temperature=persona_data.get("temperature", 0.7),
+                            model=persona_data.get("model"),
+                            guidelines=persona_data.get("guidelines", []),
+                            notes=persona_data.get("notes"),
                         )
                         personas[key] = persona_config
                     except Exception as e:
@@ -286,7 +332,9 @@ class PersonaManager:
             return personas
 
         except json.JSONDecodeError as e:
-            logger.error(f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}")
+            logger.error(
+                f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}"
+            )
             return {}
         except Exception as e:
             logger.error(f"Error loading persona configurations: {e}")
@@ -297,10 +345,12 @@ class PersonaManager:
         if not self.roles_path.exists():
             return {"persona_library": {}}
         try:
-            with open(self.roles_path, 'r', encoding='utf-8') as f:
+            with open(self.roles_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
-            logger.error(f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}")
+            logger.error(
+                f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}"
+            )
             return {"persona_library": {}}
         except Exception as e:
             logger.error(f"Error loading roles.json: {e}")
@@ -309,7 +359,7 @@ class PersonaManager:
     def _write_roles_data(self, roles_data: Dict[str, Any]) -> None:
         """Persist roles.json updates to disk."""
         try:
-            with open(self.roles_path, 'w', encoding='utf-8') as f:
+            with open(self.roles_path, "w", encoding="utf-8") as f:
                 json.dump(roles_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Failed to write roles.json: {e}")
@@ -408,14 +458,18 @@ class PersonaManager:
                 "id": key,
                 "name": persona.name,
                 "description": "AI persona available with any provider",
-                "system_preview": persona.system_prompt[:100] + "..." if len(persona.system_prompt) > 100 else persona.system_prompt,
+                "system_preview": persona.system_prompt[:100] + "..."
+                if len(persona.system_prompt) > 100
+                else persona.system_prompt,
             }
 
         return available
 
+
 # Global state (in production, use Redis or database)
 conversations: Dict[str, Conversation] = {}
 persona_manager = PersonaManager()
+
 
 def _persist_api_keys(api_keys: Dict[str, str]) -> Dict[str, str]:
     """Persist API keys to the .env file and update the process environment."""
@@ -436,6 +490,7 @@ def _persist_api_keys(api_keys: Dict[str, str]) -> Dict[str, str]:
             logger.warning(f"Failed to persist key for {provider}: {e}")
     return saved
 
+
 def _validate_persona_id(persona_id: str) -> None:
     """Ensure persona IDs are filesystem-friendly and predictable."""
     if not re.fullmatch(r"[A-Za-z0-9_-]+", persona_id):
@@ -444,15 +499,18 @@ def _validate_persona_id(persona_id: str) -> None:
             detail="Persona ID must contain only letters, numbers, hyphens, or underscores.",
         )
 
+
 @app.on_event("startup")
 async def startup_event():
     """Load persona configurations on startup"""
     persona_manager.persona_library = persona_manager.load_personas_from_config()
 
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
     return {"message": "Chat Bridge Web API is running", "version": "1.4.1"}
+
 
 @app.get("/api/providers")
 async def get_providers():
@@ -460,13 +518,11 @@ async def get_providers():
     providers = provider_choices()
     return {
         "providers": [
-            {
-                "key": p,
-                "label": get_spec(p).label,
-                "description": get_spec(p).description
-            } for p in providers
+            {"key": p, "label": get_spec(p).label, "description": get_spec(p).description}
+            for p in providers
         ]
     }
+
 
 @app.get("/api/provider-status")
 @app.post("/api/provider-status")
@@ -494,11 +550,7 @@ async def get_provider_status(request: Optional[Dict[str, Any]] = None):
 
     for provider_key in providers:
         spec = get_spec(provider_key)
-        provider_info = {
-            "label": spec.label,
-            "connected": False,
-            "error": None
-        }
+        provider_info = {"label": spec.label, "connected": False, "error": None}
 
         try:
             # Check if provider needs an API key
@@ -529,6 +581,7 @@ async def get_provider_status(request: Optional[Dict[str, Any]] = None):
 
     return {"providers": provider_status}
 
+
 @app.post("/api/api-keys/persist")
 async def persist_api_keys(request: PersistKeysRequest):
     """Persist API keys to .env for future sessions."""
@@ -537,17 +590,20 @@ async def persist_api_keys(request: PersistKeysRequest):
         raise HTTPException(status_code=400, detail="No valid API keys provided to persist.")
     return {"saved": saved}
 
+
 @app.get("/api/personas")
 async def get_personas():
     """Get available persona configurations"""
     persona_manager.refresh_from_disk()
     return {"personas": list(persona_manager.get_available_personas().values())}
 
+
 @app.get("/api/persona-manager")
 async def list_persona_manager():
     """List personas for management UI."""
     persona_manager.refresh_from_disk()
     return {"personas": persona_manager.list_persona_details()}
+
 
 @app.get("/api/persona-manager/{persona_id}")
 async def get_persona_manager(persona_id: str):
@@ -557,6 +613,7 @@ async def get_persona_manager(persona_id: str):
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
     return persona
+
 
 @app.post("/api/persona-manager")
 async def create_persona_manager(request: PersonaManagementRequest):
@@ -576,6 +633,7 @@ async def create_persona_manager(request: PersonaManagementRequest):
     )
     persona_manager.upsert_persona(request.id, persona_config)
     return {"status": "created", "persona": persona_manager.get_persona_detail(request.id)}
+
 
 @app.put("/api/persona-manager/{persona_id}")
 async def update_persona_manager(persona_id: str, request: PersonaManagementRequest):
@@ -598,6 +656,7 @@ async def update_persona_manager(persona_id: str, request: PersonaManagementRequ
     persona_manager.upsert_persona(persona_id, persona_config)
     return {"status": "updated", "persona": persona_manager.get_persona_detail(persona_id)}
 
+
 @app.delete("/api/persona-manager/{persona_id}")
 async def delete_persona_manager(persona_id: str):
     """Delete a persona entry."""
@@ -607,6 +666,7 @@ async def delete_persona_manager(persona_id: str):
         raise HTTPException(status_code=404, detail="Persona not found")
     persona_manager.delete_persona(persona_id)
     return {"status": "deleted", "persona_id": persona_id}
+
 
 @app.post("/api/conversations", response_model=dict)
 async def create_conversation(request: ConversationRequest):
@@ -624,17 +684,14 @@ async def create_conversation(request: ConversationRequest):
 
         # Add initial user message
         initial_message = Message(
-            content=request.starter_message,
-            sender="user",
-            timestamp=datetime.now(),
-            persona=None
+            content=request.starter_message, sender="user", timestamp=datetime.now(), persona=None
         )
         conversation.messages.append(initial_message)
 
         return {
             "conversation_id": conv_id,
             "status": "created",
-            "starter_message": request.starter_message
+            "starter_message": request.starter_message,
         }
 
     except RuntimeError as e:
@@ -643,6 +700,7 @@ async def create_conversation(request: ConversationRequest):
     except Exception as e:
         logger.error("Failed to create conversation: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
 
 @app.get("/api/conversations/{conversation_id}/transcript")
 async def get_conversation_transcript(conversation_id: str):
@@ -663,58 +721,58 @@ async def get_conversation_transcript(conversation_id: str):
         "transcript": transcript_content,
         "filename": filename,
         "conversation_id": conversation_id,
-        "message_count": len(conversation.messages)
+        "message_count": len(conversation.messages),
     }
+
 
 @app.get("/api/models")
 async def get_models(provider: str):
     """Get available models for a provider"""
     try:
-        if provider == 'openai':
+        if provider == "openai":
             models = [
-                {'id': 'gpt-4o', 'name': 'GPT-4o'},
-                {'id': 'gpt-4o-mini', 'name': 'GPT-4o Mini'},
-                {'id': 'gpt-4-turbo', 'name': 'GPT-4 Turbo'},
-                {'id': 'gpt-4', 'name': 'GPT-4'},
-                {'id': 'gpt-3.5-turbo', 'name': 'GPT-3.5 Turbo'}
+                {"id": "gpt-4o", "name": "GPT-4o"},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
             ]
-        elif provider == 'anthropic':
+        elif provider == "anthropic":
             models = [
-                {'id': 'claude-3-5-sonnet-20241022', 'name': 'Claude 3.5 Sonnet'},
-                {'id': 'claude-3-opus-20240229', 'name': 'Claude 3 Opus'},
-                {'id': 'claude-3-sonnet-20240229', 'name': 'Claude 3 Sonnet'},
-                {'id': 'claude-3-haiku-20240307', 'name': 'Claude 3 Haiku'}
+                {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
+                {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus"},
+                {"id": "claude-3-sonnet-20240229", "name": "Claude 3 Sonnet"},
+                {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
             ]
-        elif provider == 'gemini':
+        elif provider == "gemini":
             models = [
-                {'id': 'gemini-1.5-flash', 'name': 'Gemini 1.5 Flash'},
-                {'id': 'gemini-1.5-pro', 'name': 'Gemini 1.5 Pro'},
-                {'id': 'gemini-1.0-pro', 'name': 'Gemini 1.0 Pro'}
+                {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+                {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+                {"id": "gemini-1.0-pro", "name": "Gemini 1.0 Pro"},
             ]
-        elif provider == 'deepseek':
+        elif provider == "deepseek":
             models = [
-                {'id': 'deepseek-chat', 'name': 'DeepSeek Chat'},
-                {'id': 'deepseek-coder', 'name': 'DeepSeek Coder'}
+                {"id": "deepseek-chat", "name": "DeepSeek Chat"},
+                {"id": "deepseek-coder", "name": "DeepSeek Coder"},
             ]
-        elif provider == 'openrouter':
-            openrouter_key = os.getenv('OPENROUTER_API_KEY')
+        elif provider == "openrouter":
+            openrouter_key = os.getenv("OPENROUTER_API_KEY")
 
             if openrouter_key:
                 try:
                     # Fetch from real OpenRouter API
                     async with httpx.AsyncClient() as client:
                         response = await client.get(
-                            "https://openrouter.ai/api/v1/models",
-                            timeout=10.0
+                            "https://openrouter.ai/api/v1/models", timeout=10.0
                         )
                         response.raise_for_status()
                         data = response.json()
 
                         models = []
-                        for model in data.get('data', []):
-                            pricing = model.get('pricing', {})
-                            prompt_price = pricing.get('prompt', '0.000')
-                            completion_price = pricing.get('completion', '0.000')
+                        for model in data.get("data", []):
+                            pricing = model.get("pricing", {})
+                            prompt_price = pricing.get("prompt", "0.000")
+                            completion_price = pricing.get("completion", "0.000")
 
                             # Format pricing nicely
                             if prompt_price == completion_price:
@@ -722,16 +780,13 @@ async def get_models(provider: str):
                             else:
                                 price_display = f"Prompt: ${prompt_price}, Completion: ${completion_price}/1000 tokens"
 
-                            name = model.get('name', model.get('id', 'Unknown'))
+                            name = model.get("name", model.get("id", "Unknown"))
                             full_name = f"{name} ({price_display})"
 
-                            models.append({
-                                'id': model.get('id'),
-                                'name': full_name
-                            })
+                            models.append({"id": model.get("id"), "name": full_name})
 
                         # Sort by name for better UX
-                        models.sort(key=lambda x: x['name'])
+                        models.sort(key=lambda x: x["name"])
                         logger.info(f"Fetched {len(models)} models from OpenRouter API")
 
                         return {"models": models}
@@ -742,35 +797,36 @@ async def get_models(provider: str):
 
             # Fallback static list (basic models)
             models = [
-                {'id': 'openai/gpt-4o', 'name': 'GPT-4o (free)'},
-                {'id': 'openai/gpt-4o-mini', 'name': 'GPT-4o Mini (free)'},
-                {'id': 'anthropic/claude-3-5-sonnet', 'name': 'Claude 3.5 Sonnet (free)'},
-                {'id': 'anthropic/claude-3-haiku', 'name': 'Claude 3 Haiku (free)'},
-                {'id': 'google/gemini-pro', 'name': 'Gemini Pro (free)'},
-                {'id': 'meta-llama/llama-3.1-8b-instruct', 'name': 'Llama 3.1 8B (free)'}
+                {"id": "openai/gpt-4o", "name": "GPT-4o (free)"},
+                {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini (free)"},
+                {"id": "anthropic/claude-3-5-sonnet", "name": "Claude 3.5 Sonnet (free)"},
+                {"id": "anthropic/claude-3-haiku", "name": "Claude 3 Haiku (free)"},
+                {"id": "google/gemini-pro", "name": "Gemini Pro (free)"},
+                {"id": "meta-llama/llama-3.1-8b-instruct", "name": "Llama 3.1 8B (free)"},
             ]
-        elif provider == 'ollama':
+        elif provider == "ollama":
             # For Ollama, we use the model names directly
             models = [
-                {'id': 'llama3.2:3b', 'name': 'Llama 3.2 3B'},
-                {'id': 'llama3.2:1b', 'name': 'Llama 3.2 1B'},
-                {'id': 'llama3.1:8b', 'name': 'Llama 3.1 8B'},
-                {'id': 'mistral:7b', 'name': 'Mistral 7B'}
+                {"id": "llama3.2:3b", "name": "Llama 3.2 3B"},
+                {"id": "llama3.2:1b", "name": "Llama 3.2 1B"},
+                {"id": "llama3.1:8b", "name": "Llama 3.1 8B"},
+                {"id": "mistral:7b", "name": "Mistral 7B"},
             ]
-        elif provider == 'lmstudio':
+        elif provider == "lmstudio":
             models = [
-                {'id': 'local-model', 'name': 'Local Model'},
-                {'id': 'llama-3.1-8b-instruct', 'name': 'Llama 3.1 8B Instruct'},
-                {'id': 'mistral-7b-instruct', 'name': 'Mistral 7B Instruct'},
-                {'id': 'qwen-2.5-7b-instruct', 'name': 'Qwen 2.5 7B Instruct'},
-                {'id': 'wizardlm-2-8x22b', 'name': 'WizardLM-2 8x22B'}
+                {"id": "local-model", "name": "Local Model"},
+                {"id": "llama-3.1-8b-instruct", "name": "Llama 3.1 8B Instruct"},
+                {"id": "mistral-7b-instruct", "name": "Mistral 7B Instruct"},
+                {"id": "qwen-2.5-7b-instruct", "name": "Qwen 2.5 7B Instruct"},
+                {"id": "wizardlm-2-8x22b", "name": "WizardLM-2 8x22B"},
             ]
         else:
-            models = [{'id': 'default-model', 'name': 'Default Model'}]
+            models = [{"id": "default-model", "name": "Default Model"}]
 
         return {"models": models}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching models: {str(e)}") from e
+
 
 @app.websocket("/ws/conversations/{conversation_id}")
 async def websocket_conversation(websocket: WebSocket, conversation_id: str):
@@ -789,19 +845,20 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
 
         # Send conversation history
         for msg in conversation.messages:
-            await websocket.send_json({
-                "type": "message",
-                "data": {
-                    "content": msg.content,
-                    "sender": msg.sender,
-                    "timestamp": msg.timestamp.isoformat(),
-                    "persona": msg.persona
+            await websocket.send_json(
+                {
+                    "type": "message",
+                    "data": {
+                        "content": msg.content,
+                        "sender": msg.sender,
+                        "timestamp": msg.timestamp.isoformat(),
+                        "persona": msg.persona,
+                    },
                 }
-            })
+            )
 
         # Start conversation loop
         current_agent = conversation.agent_a
-        agent_name = "agent_a"
         turn_counter = 0
 
         while conversation.active and turn_counter < conversation.request.max_rounds:
@@ -809,67 +866,68 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
                 turn_counter += 1
 
                 # Agent A response
-                context = [msg.content for msg in conversation.messages[-conversation.request.mem_rounds:]]
+                context = [
+                    msg.content for msg in conversation.messages[-conversation.request.mem_rounds :]
+                ]
                 response_a = await current_agent.generate_response(
-                    " ".join(context),
-                    conversation.request.mem_rounds
+                    " ".join(context), conversation.request.mem_rounds
                 )
                 message_a = Message(
                     content=response_a,
                     sender="agent_a",
                     timestamp=datetime.now(),
-                    persona=getattr(conversation.request, 'persona_a', None)
+                    persona=getattr(conversation.request, "persona_a", None),
                 )
                 conversation.messages.append(message_a)
-                await websocket.send_json({
-                    "type": "message",
-                    "data": {
-                        "content": response_a,
-                        "sender": "agent_a",
-                        "timestamp": message_a.timestamp.isoformat(),
-                        "persona": message_a.persona
+                await websocket.send_json(
+                    {
+                        "type": "message",
+                        "data": {
+                            "content": response_a,
+                            "sender": "agent_a",
+                            "timestamp": message_a.timestamp.isoformat(),
+                            "persona": message_a.persona,
+                        },
                     }
-                })
+                )
 
                 await asyncio.sleep(0.05)
 
                 # Agent B response
                 current_agent = conversation.agent_b
-                agent_name = "agent_b"
-                context = [msg.content for msg in conversation.messages[-conversation.request.mem_rounds:]]
+                context = [
+                    msg.content for msg in conversation.messages[-conversation.request.mem_rounds :]
+                ]
                 response_b = await current_agent.generate_response(
-                    " ".join(context),
-                    conversation.request.mem_rounds
+                    " ".join(context), conversation.request.mem_rounds
                 )
                 message_b = Message(
                     content=response_b,
                     sender="agent_b",
                     timestamp=datetime.now(),
-                    persona=getattr(conversation.request, 'persona_b', None)
+                    persona=getattr(conversation.request, "persona_b", None),
                 )
                 conversation.messages.append(message_b)
-                await websocket.send_json({
-                    "type": "message",
-                    "data": {
-                        "content": response_b,
-                        "sender": "agent_b",
-                        "timestamp": message_b.timestamp.isoformat(),
-                        "persona": message_b.persona
+                await websocket.send_json(
+                    {
+                        "type": "message",
+                        "data": {
+                            "content": response_b,
+                            "sender": "agent_b",
+                            "timestamp": message_b.timestamp.isoformat(),
+                            "persona": message_b.persona,
+                        },
                     }
-                })
+                )
 
                 await asyncio.sleep(0.05)
 
                 # Switch back to A for next round
                 current_agent = conversation.agent_a
-                agent_name = "agent_a"
 
             except Exception as e:
                 logger.error(f"Error in conversation loop: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "data": str(e)
-                })
+                await websocket.send_json({"type": "error", "data": str(e)})
                 break
 
         # Conversation ended
@@ -891,51 +949,6 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
             except Exception as e:
                 logger.error(f"Failed to finalize session {conversation_id}: {e}")
 
-async def load_persona_configurations():
-    """Load persona configurations from roles.json with robust error handling"""
-    try:
-        # Convert to absolute path for consistent resolution
-        script_dir = Path(__file__).parent.parent.parent.resolve()
-        roles_path = script_dir / "roles.json"
-
-        # Check file existence with helpful error messages
-        if not roles_path.exists():
-            available_files = [f.name for f in script_dir.glob("*.json")]
-            logger.warning(f"roles.json not found. Available files: {available_files}")
-            return
-
-        # Use explicit encoding to prevent encoding issues
-        with open(roles_path, 'r', encoding='utf-8') as f:
-            roles_data = json.load(f)
-
-        if 'persona_library' in roles_data:
-            for key, persona_data in roles_data['persona_library'].items():
-                try:
-                    # Convert to PersonaConfig format
-                    # Ensure 'provider' is handled, defaulting if missing or null
-                    provider_value = persona_data.get('provider')
-                    if provider_value is None:  # Handle explicit null as well
-                        provider_value = 'openai' # Default provider when explicitly null or missing
-
-                    persona_config = PersonaConfig(
-                        name=persona_data.get('name', key),
-                        provider=provider_value,
-                        system_prompt=persona_data.get('system', ''),
-                        temperature=persona_data.get('temperature', 0.7),
-                        model=persona_data.get('model'),
-                        guidelines=persona_data.get('guidelines', [])
-                    )
-                    persona_library[key] = persona_config
-                except Exception as e:
-                    logger.warning(f"Failed to load persona {key}: {e}")
-
-        logger.info(f"Loaded {len(persona_library)} personas from roles.json")
-
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON syntax error in roles.json: line {e.lineno}, column {e.colno}: {e.msg}")
-        logger.error(f"Error at character position {e.pos}")
-    except Exception as e:
-        logger.error(f"Error loading persona configurations: {e}")
 
 @app.get("/api/guides")
 async def get_guides():
@@ -945,36 +958,39 @@ async def get_guides():
             "id": "getting-started",
             "title": "Getting Started",
             "category": "Basics",
-            "description": "Learn how to start your first agent conversation."
+            "description": "Learn how to start your first agent conversation.",
         },
         {
             "id": "providers",
             "title": "AI Providers",
             "category": "Config",
-            "description": "Information about supported AI providers and models."
-        }
+            "description": "Information about supported AI providers and models.",
+        },
     ]
     return {"guides": guides}
+
 
 @app.get("/api/guides/{guide_id}")
 async def get_guide_content(guide_id: str):
     """Get content of a specific guide"""
     # Convert ID to filename
     file_path = Path("guides") / f"{guide_id}.md"
-    
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Guide not found")
-        
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
         return {"guide_id": guide_id, "content": content}
     except Exception as e:
         logger.error(f"Error reading guide {guide_id}: {e}")
-        raise HTTPException(status_code=500, detail="Error reading guide content")
+        raise HTTPException(status_code=500, detail="Error reading guide content") from e
+
 
 if __name__ == "__main__":
     import uvicorn
+
     print("🚀 Starting Chat Bridge Web Backend on http://0.0.0.0:8000")
     print("📁 Loaded personas from roles.json")
     print("⏹️  Press Ctrl+C to stop the server")
