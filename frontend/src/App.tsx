@@ -60,6 +60,19 @@ const statusTone: Record<ConversationStatus, string> = {
   error: 'bg-winamp-red text-win-gray-600 border-win-gray-400',
 };
 
+const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '');
+
+const apiBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL ?? '');
+const wsBaseUrl = normalizeBaseUrl(import.meta.env.VITE_WS_BASE_URL ?? '');
+
+const buildApiUrl = (path: string) => `${apiBaseUrl}${path}`;
+
+const buildWsUrl = (path: string) => {
+  const fallbackBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  const base = wsBaseUrl || fallbackBase;
+  return `${base}${path}`;
+};
+
 const Banner = ({ banner, onClose }: { banner: BannerState | null; onClose: () => void }) => {
   if (!banner) {
     return null;
@@ -236,7 +249,7 @@ const RetroChatBridge = () => {
 
   const fetchProviders = useCallback(async () => {
     try {
-      const response = await fetch('/api/providers');
+      const response = await fetch(buildApiUrl('/api/providers'));
       if (!response.ok) {
         throw new Error(`Server responded with ${response.status}`);
       }
@@ -273,7 +286,7 @@ const RetroChatBridge = () => {
   const fetchProviderStatus = useCallback(async () => {
     setIsLoadingProviderStatus(true);
     try {
-      const response = await fetch('/api/provider-status', {
+      const response = await fetch(buildApiUrl('/api/provider-status'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_keys: apiKeys }),
@@ -304,7 +317,7 @@ const RetroChatBridge = () => {
     }
     setIsSavingKeys(true);
     try {
-      const response = await fetch('/api/api-keys/persist', {
+      const response = await fetch(buildApiUrl('/api/api-keys/persist'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_keys: apiKeys }),
@@ -326,7 +339,7 @@ const RetroChatBridge = () => {
 
   const fetchGuides = async () => {
     try {
-      const response = await fetch('/api/guides');
+      const response = await fetch(buildApiUrl('/api/guides'));
       if (!response.ok) {
         throw new Error(`Server responded with ${response.status}`);
       }
@@ -341,7 +354,7 @@ const RetroChatBridge = () => {
   const fetchGuideContent = async (guideId: string) => {
     setIsLoadingGuide(true);
     try {
-      const response = await fetch(`/api/guides/${guideId}`);
+      const response = await fetch(buildApiUrl(`/api/guides/${guideId}`));
       if (!response.ok) {
         throw new Error(`Server responded with ${response.status}`);
       }
@@ -358,7 +371,7 @@ const RetroChatBridge = () => {
   const fetchPersonas = useCallback(async () => {
     setIsLoadingPersonas(true);
     try {
-      const response = await fetch('/api/personas');
+      const response = await fetch(buildApiUrl('/api/personas'));
       if (!response.ok) {
         throw new Error(`Failed to fetch personas: ${response.status}`);
       }
@@ -375,7 +388,7 @@ const RetroChatBridge = () => {
   const fetchPersonaManager = useCallback(async () => {
     setIsLoadingPersonaManager(true);
     try {
-      const response = await fetch('/api/persona-manager');
+      const response = await fetch(buildApiUrl('/api/persona-manager'));
       if (!response.ok) {
         throw new Error(`Failed to fetch persona manager: ${response.status}`);
       }
@@ -432,7 +445,9 @@ const RetroChatBridge = () => {
     };
 
     const isEditing = Boolean(activePersonaId);
-    const url = isEditing ? `/api/persona-manager/${activePersonaId}` : '/api/persona-manager';
+    const url = isEditing
+      ? buildApiUrl(`/api/persona-manager/${activePersonaId}`)
+      : buildApiUrl('/api/persona-manager');
     const method = isEditing ? 'PUT' : 'POST';
 
     try {
@@ -463,7 +478,7 @@ const RetroChatBridge = () => {
       return;
     }
     try {
-      const response = await fetch(`/api/persona-manager/${activePersonaId}`, { method: 'DELETE' });
+      const response = await fetch(buildApiUrl(`/api/persona-manager/${activePersonaId}`), { method: 'DELETE' });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail ?? 'Failed to delete persona');
@@ -485,7 +500,7 @@ const RetroChatBridge = () => {
       setIsLoadingModelsB(true);
     }
     try {
-      const response = await fetch(`/api/models?provider=${provider}`);
+      const response = await fetch(buildApiUrl(`/api/models?provider=${provider}`));
       if (!response.ok) {
         throw new Error(`Failed to fetch models for ${provider}`);
       }
@@ -516,7 +531,7 @@ const RetroChatBridge = () => {
   const fetchPersonaModels = useCallback(async (provider: string) => {
     setIsLoadingPersonaModels(true);
     try {
-      const response = await fetch(`/api/models?provider=${provider}`);
+      const response = await fetch(buildApiUrl(`/api/models?provider=${provider}`));
       if (!response.ok) {
         throw new Error(`Failed to fetch models for ${provider}`);
       }
@@ -569,7 +584,7 @@ const RetroChatBridge = () => {
       return undefined;
     }
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/conversations/${conversationId}`);
+    const ws = new WebSocket(buildWsUrl(`/ws/conversations/${conversationId}`));
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -725,7 +740,7 @@ const RetroChatBridge = () => {
       setConversationStatus('configuring');
       setBanner({ type: 'info', message: 'Setting up the bridge. Your agents will begin shortly.' });
 
-      const response = await fetch('/api/conversations', {
+      const response = await fetch(buildApiUrl('/api/conversations'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -880,7 +895,7 @@ const RetroChatBridge = () => {
                   type="button"
                   onClick={async () => {
                     try {
-                      const response = await fetch(`/api/conversations/${conversationId}/transcript`);
+                      const response = await fetch(buildApiUrl(`/api/conversations/${conversationId}/transcript`));
                       if (!response.ok) {
                         throw new Error(`Server responded with ${response.status}`);
                       }
