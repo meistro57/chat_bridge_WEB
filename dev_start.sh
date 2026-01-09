@@ -69,6 +69,8 @@ fi
 
 # Setup Environment
 export PYTHONPATH=$(pwd):$(pwd)/backend:$CORE_DEP
+export VITE_API_BASE_URL="http://localhost:$BACKEND_PORT"
+export VITE_WS_BASE_URL="ws://localhost:$BACKEND_PORT"
 
 # 1. Start Backend
 echo -e "${BLUE}Starting Backend on port $BACKEND_PORT...${NC}"
