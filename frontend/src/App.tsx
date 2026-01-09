@@ -1,6 +1,6 @@
 // App.tsx
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import type { Persona, PersonaDetail, Message, Model, Guide, GuideContent } from './types';
+import type { Persona, PersonaDetail, Message, Model, Guide, GuideContent, ProviderOption } from './types';
 
 interface BannerState {
   type: 'info' | 'success' | 'warning' | 'error';
@@ -11,7 +11,7 @@ type ModalType = 'agentA' | 'agentB' | 'guides' | 'settings' | 'personas' | null
 
 type ConversationStatus = 'idle' | 'configuring' | 'running' | 'finished' | 'error';
 
-const PROVIDER_OPTIONS = [
+const DEFAULT_PROVIDER_OPTIONS: ProviderOption[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'gemini', label: 'Gemini' },
@@ -163,8 +163,9 @@ const RetroChatBridge = () => {
   const [selectedPersonaB, setSelectedPersonaB] = useState<Persona | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [selectedProviderA, setSelectedProviderA] = useState(PROVIDER_OPTIONS[0]?.value ?? 'openai');
-  const [selectedProviderB, setSelectedProviderB] = useState(PROVIDER_OPTIONS[1]?.value ?? 'anthropic');
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(DEFAULT_PROVIDER_OPTIONS);
+  const [selectedProviderA, setSelectedProviderA] = useState(DEFAULT_PROVIDER_OPTIONS[0]?.value ?? 'openai');
+  const [selectedProviderB, setSelectedProviderB] = useState(DEFAULT_PROVIDER_OPTIONS[1]?.value ?? 'anthropic');
   const [selectedModelA, setSelectedModelA] = useState<string>('');
   const [selectedModelB, setSelectedModelB] = useState<string>('');
   const [modelsA, setModelsA] = useState<Model[]>([]);
@@ -192,7 +193,7 @@ const RetroChatBridge = () => {
   const [personaForm, setPersonaForm] = useState<PersonaDetail>({
     id: '',
     name: '',
-    provider: PROVIDER_OPTIONS[0]?.value ?? 'openai',
+    provider: DEFAULT_PROVIDER_OPTIONS[0]?.value ?? 'openai',
     system_prompt: '',
     temperature: 0.7,
     model: null,
@@ -224,6 +225,34 @@ const RetroChatBridge = () => {
   const [providerStatus, setProviderStatus] = useState<Record<string, any>>({});
   const [isLoadingProviderStatus, setIsLoadingProviderStatus] = useState(true);
 
+  const fetchProviders = useCallback(async () => {
+    try {
+      const response = await fetch('/api/providers');
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+      const data = await response.json();
+      const options = (data.providers ?? [])
+        .map((provider: { key?: string; label?: string; description?: string }) => ({
+          value: provider.key ?? '',
+          label: provider.label ?? provider.key ?? 'Unknown',
+          description: provider.description,
+        }))
+        .filter((provider: ProviderOption) => provider.value);
+      if (options.length === 0) {
+        throw new Error('No providers returned by the API.');
+      }
+      setProviderOptions(options);
+    } catch (error) {
+      console.error('Failed to fetch providers:', error);
+      setProviderOptions(DEFAULT_PROVIDER_OPTIONS);
+      setBanner({
+        type: 'warning',
+        message: 'Provider list unavailable. Falling back to the default set.',
+      });
+    }
+  }, []);
+
   const personaModelOptions = useMemo(() => {
     const options = [...personaModels];
     if (personaForm.model && !personaModels.some((model) => model.id === personaForm.model)) {
@@ -249,14 +278,14 @@ const RetroChatBridge = () => {
       console.error('Failed to fetch provider status:', error);
       // Set all providers to disconnected on error
       const disconnectedStatus: Record<string, any> = {};
-      Object.keys(PROVIDER_OPTIONS.reduce((acc, opt) => ({ ...acc, [opt.value]: true }), {})).forEach(key => {
+      Object.keys(providerOptions.reduce((acc, opt) => ({ ...acc, [opt.value]: true }), {})).forEach(key => {
         disconnectedStatus[key] = { connected: false, label: key, error: 'Status check failed' };
       });
       setProviderStatus(disconnectedStatus);
     } finally {
       setIsLoadingProviderStatus(false);
     }
-  }, [apiKeys]);
+  }, [apiKeys, providerOptions]);
 
   const persistApiKeys = useCallback(async (): Promise<boolean> => {
     const hasKeys = Object.values(apiKeys).some((key) => key.trim().length > 0);
@@ -357,7 +386,7 @@ const RetroChatBridge = () => {
     setPersonaForm({
       id: '',
       name: '',
-      provider: PROVIDER_OPTIONS[0]?.value ?? 'openai',
+      provider: DEFAULT_PROVIDER_OPTIONS[0]?.value ?? 'openai',
       system_prompt: '',
       temperature: 0.7,
       model: null,
@@ -505,6 +534,28 @@ const RetroChatBridge = () => {
   }, [fetchPersonaModels, personaForm.provider]);
 
   useEffect(() => {
+    if (providerOptions.length === 0) {
+      return;
+    }
+    setSelectedProviderA((prev) =>
+      providerOptions.some((option) => option.value === prev)
+        ? prev
+        : providerOptions[0]?.value ?? prev,
+    );
+    setSelectedProviderB((prev) =>
+      providerOptions.some((option) => option.value === prev)
+        ? prev
+        : providerOptions[1]?.value ?? providerOptions[0]?.value ?? prev,
+    );
+    setPersonaForm((prev) => ({
+      ...prev,
+      provider: providerOptions.some((option) => option.value === prev.provider)
+        ? prev.provider
+        : providerOptions[0]?.value ?? prev.provider,
+    }));
+  }, [providerOptions]);
+
+  useEffect(() => {
     if (!conversationId) {
       return undefined;
     }
@@ -605,10 +656,11 @@ const RetroChatBridge = () => {
   }, [fetchProviderStatus, modalType, resetPersonaForm]);
 
   useEffect(() => {
+    fetchProviders();
     fetchProviderStatus();
     fetchGuides();
     fetchPersonas();
-  }, [fetchPersonas, fetchProviderStatus]);
+  }, [fetchPersonas, fetchProviderStatus, fetchProviders]);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -739,7 +791,7 @@ const RetroChatBridge = () => {
           onChange={(event) => onProviderChange(event.target.value)}
           className="rounded-lg border border-win-gray-400 bg-win-gray-100 px-3 py-2 text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
         >
-          {PROVIDER_OPTIONS.map((option) => (
+          {providerOptions.map((option) => (
             <option key={option.value} value={option.value} className="bg-win-gray-100 text-win-gray-800">
               {option.label}
             </option>
@@ -1095,7 +1147,7 @@ const RetroChatBridge = () => {
                   Enter your API keys for the providers you wish to use. Keys can stay in memory for this session or be saved into a server-side .env file for future sessions.
                 </p>
                 <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
-                  {PROVIDER_OPTIONS.filter(opt => !['ollama', 'lmstudio'].includes(opt.value)).map((opt) => (
+                  {providerOptions.filter(opt => !['ollama', 'lmstudio'].includes(opt.value)).map((opt) => (
                     <label key={opt.value} className="flex flex-col gap-1">
                       <span className="text-xs uppercase tracking-wide text-win-gray-600 font-semibold">{opt.label} API Key</span>
                       <input
@@ -1217,7 +1269,7 @@ const RetroChatBridge = () => {
                         }}
                         className="rounded border-2 border-win-gray-400 bg-win-gray-100 px-3 py-2 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
                       >
-                        {PROVIDER_OPTIONS.map((option) => (
+                        {providerOptions.map((option) => (
                           <option key={option.value} value={option.value} className="bg-win-gray-100 text-win-gray-800">
                             {option.label}
                           </option>
