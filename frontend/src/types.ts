@@ -36,6 +36,12 @@ export interface ProviderModels {
   models: Model[];
 }
 
+export interface ProviderOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
 export interface Guide {
   id: string;
   title: string;
