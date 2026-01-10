@@ -15,6 +15,14 @@ interface ProviderStatusEntry {
 
 type ProviderStatusMap = Record<string, ProviderStatusEntry>;
 
+interface LlmTestEntry {
+  prompt: string;
+  model: string;
+  status: 'idle' | 'running' | 'success' | 'error';
+  response?: string;
+  error?: string;
+}
+
 type ModalType = 'agentA' | 'agentB' | 'guides' | 'settings' | 'personas' | null;
 
 type ConversationStatus = 'idle' | 'configuring' | 'running' | 'finished' | 'error';
@@ -208,6 +216,7 @@ const RetroChatBridge = () => {
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [persistKeys, setPersistKeys] = useState(false);
   const [isSavingKeys, setIsSavingKeys] = useState(false);
+  const [llmTests, setLlmTests] = useState<Record<string, LlmTestEntry>>({});
   const [personaManagerEntries, setPersonaManagerEntries] = useState<PersonaDetail[]>([]);
   const [isLoadingPersonaManager, setIsLoadingPersonaManager] = useState(false);
   const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
@@ -580,6 +589,76 @@ const RetroChatBridge = () => {
   }, [providerOptions]);
 
   useEffect(() => {
+    setLlmTests((prev) => {
+      const next: Record<string, LlmTestEntry> = { ...prev };
+      providerOptions.forEach((option) => {
+        if (!next[option.value]) {
+          next[option.value] = {
+            prompt: `Say hello from ${option.label}.`,
+            model: '',
+            status: 'idle',
+          };
+        }
+      });
+      Object.keys(next).forEach((provider) => {
+        if (!providerOptions.some((option) => option.value === provider)) {
+          delete next[provider];
+        }
+      });
+      return next;
+    });
+  }, [providerOptions]);
+
+  const updateLlmTestEntry = (providerKey: string, updates: Partial<LlmTestEntry>) => {
+    setLlmTests((prev) => ({
+      ...prev,
+      [providerKey]: {
+        ...prev[providerKey],
+        ...updates,
+      },
+    }));
+  };
+
+  const runLlmTest = async (providerKey: string) => {
+    const entry = llmTests[providerKey];
+    if (!entry?.prompt?.trim()) {
+      setBanner({ type: 'warning', message: 'Add a prompt before testing the provider.' });
+      return;
+    }
+
+    updateLlmTestEntry(providerKey, { status: 'running', error: undefined, response: undefined });
+
+    try {
+      const response = await fetch(buildApiUrl('/api/llm-test'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: providerKey,
+          prompt: entry.prompt,
+          model: entry.model?.trim() ? entry.model.trim() : null,
+          api_keys: apiKeys,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail ?? `Provider test failed (${response.status}).`);
+      }
+
+      const data = await response.json();
+      updateLlmTestEntry(providerKey, {
+        status: 'success',
+        response: data.response ?? 'No response payload returned.',
+      });
+    } catch (error) {
+      updateLlmTestEntry(providerKey, {
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to run provider test.',
+      });
+    }
+  };
+
+  useEffect(() => {
     if (!conversationId) {
       return undefined;
     }
@@ -607,6 +686,13 @@ const RetroChatBridge = () => {
         } else if (data.type === 'message' && data.data) {
           stopTyping(); // Stop typing indicator when message arrives
           setMessages((prevMessages) => {
+            const isDuplicate = prevMessages.some(
+              (message) => message.sender === data.data.sender && message.content === data.data.content,
+            );
+            if (isDuplicate) {
+              return prevMessages;
+            }
+
             const newMessages = [...prevMessages, {
               content: data.data.content,
               sender: data.data.sender,
@@ -764,7 +850,14 @@ const RetroChatBridge = () => {
       }
 
       const data = await response.json();
-      setMessages([]);
+      setMessages([
+        {
+          content: inputMessage,
+          sender: 'user',
+          timestamp: new Date().toISOString(),
+          persona: null,
+        },
+      ]);
       setConversationId(data.conversation_id);
       setIsTyping(true);
     } catch (error) {
@@ -933,6 +1026,81 @@ const RetroChatBridge = () => {
           providerStatus={providerStatus} 
           isLoading={isLoadingProviderStatus} 
         />
+
+        <div className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 p-4 shadow-inner shadow-win-gray-500">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-win-gray-800">LLM test bench</h3>
+              <p className="text-sm text-win-gray-600">
+                Verify each provider with a quick prompt. Results stream back from the backend using your configured keys.
+              </p>
+            </div>
+            <div className="text-xs text-win-gray-500">
+              Tip: use the Keys modal to store credentials first.
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {providerOptions.map((provider) => {
+              const entry = llmTests[provider.value];
+              const status = providerStatus[provider.value];
+              const statusLabel = status?.connected ? 'Connected' : 'Needs auth';
+              const statusTone = status?.connected ? 'text-winamp-green' : 'text-winamp-red';
+
+              return (
+                <div
+                  key={provider.value}
+                  className="flex flex-col gap-3 rounded-lg border border-win-gray-400 bg-win-gray-100 p-3 shadow-inner shadow-win-gray-300"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-win-gray-800">{provider.label}</p>
+                      <p className={`text-xs ${statusTone}`}>{statusLabel}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => runLlmTest(provider.value)}
+                      disabled={entry?.status === 'running' || !entry?.prompt?.trim()}
+                      className="rounded border-2 border-win-gray-400 bg-winamp-teal px-3 py-1 text-xs font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {entry?.status === 'running' ? 'Testing…' : 'Run test'}
+                    </button>
+                  </div>
+                  <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-win-gray-600">
+                    Model (optional)
+                    <input
+                      type="text"
+                      value={entry?.model ?? ''}
+                      onChange={(event) => updateLlmTestEntry(provider.value, { model: event.target.value })}
+                      placeholder="provider default"
+                      className="rounded border border-win-gray-400 bg-win-gray-100 px-2 py-1 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-win-gray-600">
+                    Prompt
+                    <textarea
+                      value={entry?.prompt ?? ''}
+                      onChange={(event) => updateLlmTestEntry(provider.value, { prompt: event.target.value })}
+                      rows={2}
+                      className="resize-none rounded border border-win-gray-400 bg-win-gray-100 px-2 py-1 text-sm text-win-gray-800 shadow-inner shadow-win-gray-300 transition focus:border-win-gray-600 focus:outline-none"
+                    />
+                  </label>
+                  {entry?.status === 'error' && (
+                    <div className="rounded border border-winamp-red/30 bg-winamp-red/10 px-2 py-2 text-xs text-winamp-red">
+                      {entry.error ?? 'Test failed.'}
+                    </div>
+                  )}
+                  {entry?.status === 'success' && entry.response && (
+                    <div className="rounded border border-winamp-blue/30 bg-winamp-blue/10 px-2 py-2 text-xs text-win-gray-700">
+                      <span className="block text-xs font-semibold text-win-gray-600">Response</span>
+                      <span className="mt-1 block whitespace-pre-wrap">{entry.response}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         {banner && <Banner banner={banner} onClose={() => setBanner(null)} />}
 

@@ -107,6 +107,14 @@ class PersistKeysRequest(BaseModel):
     api_keys: Dict[str, str] = {}
 
 
+class LlmTestRequest(BaseModel):
+    provider: str
+    prompt: str
+    model: Optional[str] = None
+    temperature: Optional[float] = 0.2
+    api_keys: Optional[Dict[str, str]] = {}
+
+
 class PersonaManagementRequest(BaseModel):
     id: str
     name: str
@@ -608,6 +616,48 @@ async def persist_api_keys(request: PersistKeysRequest):
     if not saved:
         raise HTTPException(status_code=400, detail="No valid API keys provided to persist.")
     return {"saved": saved}
+
+
+@app.post("/api/llm-test")
+async def test_llm(request: LlmTestRequest):
+    """Send a lightweight test prompt to a provider."""
+    if not request.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    try:
+        if request.api_keys:
+            for provider, key in request.api_keys.items():
+                if key and key.strip():
+                    try:
+                        spec = get_spec(provider)
+                        if spec.key_env:
+                            os.environ[spec.key_env] = key.strip()
+                    except Exception as exc:
+                        logger.warning("Unable to apply API key for %s: %s", provider, exc)
+
+        spec = get_spec(request.provider)
+        if spec.needs_key:
+            ensure_credentials(request.provider)
+
+        resolved_model = resolve_model(request.provider, request.model)
+        agent = create_agent(
+            "test",
+            request.provider,
+            resolved_model,
+            request.temperature if request.temperature is not None else 0.2,
+            spec.default_system,
+        )
+        response_text = await agent.generate_response(request.prompt, 1)
+        return {
+            "provider": request.provider,
+            "model": resolved_model,
+            "response": response_text,
+        }
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("LLM test failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to run provider test.") from exc
 
 
 @app.get("/api/personas")
