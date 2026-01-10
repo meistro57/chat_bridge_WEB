@@ -173,6 +173,46 @@ const ProviderStatusIndicator = ({ providerStatus, isLoading }: { providerStatus
   </div>
 );
 
+const MetricsPanel = ({
+  totalTokens,
+  avgResponseTime,
+  messageCount,
+  conversationStatus
+}: {
+  totalTokens: number;
+  avgResponseTime: number;
+  messageCount: number;
+  conversationStatus: ConversationStatus;
+}) => {
+  if (messageCount === 0 || conversationStatus === 'idle') {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 rounded-lg border border-win-gray-400 bg-gradient-to-r from-winamp-teal/10 to-winamp-blue/10 p-3 shadow-inner shadow-win-gray-300">
+      <h3 className="text-xs font-semibold text-win-gray-800 mb-2 uppercase tracking-wide">📊 Session Metrics</h3>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="flex flex-col items-center gap-1 rounded bg-white/50 px-3 py-2 border border-win-gray-300">
+          <span className="text-xs text-win-gray-600 uppercase tracking-wide">Messages</span>
+          <span className="text-lg font-bold text-winamp-blue">{messageCount}</span>
+        </div>
+        <div className="flex flex-col items-center gap-1 rounded bg-white/50 px-3 py-2 border border-win-gray-300">
+          <span className="text-xs text-win-gray-600 uppercase tracking-wide">Total Tokens</span>
+          <span className="text-lg font-bold text-winamp-teal">{totalTokens.toLocaleString()}</span>
+        </div>
+        <div className="flex flex-col items-center gap-1 rounded bg-white/50 px-3 py-2 border border-win-gray-300">
+          <span className="text-xs text-win-gray-600 uppercase tracking-wide">Avg Response</span>
+          <span className="text-lg font-bold text-winamp-purple">{avgResponseTime.toFixed(2)}s</span>
+        </div>
+        <div className="flex flex-col items-center gap-1 rounded bg-white/50 px-3 py-2 border border-win-gray-300">
+          <span className="text-xs text-win-gray-600 uppercase tracking-wide">Est. Cost</span>
+          <span className="text-lg font-bold text-winamp-green">${(totalTokens * 0.00001).toFixed(4)}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const formatTimestamp = (timestamp: string) => {
   try {
     return new Date(timestamp).toLocaleTimeString([], {
@@ -234,6 +274,12 @@ const RetroChatBridge = () => {
   // Enhanced UX state variables
   const autoScroll = true;
   const [isTyping, setIsTyping] = useState(false);
+
+  // iFrame and metrics state
+  const [isEmbedded, setIsEmbedded] = useState(false);
+  const [compactMode, setCompactMode] = useState(false);
+  const [totalTokens, setTotalTokens] = useState(0);
+  const [avgResponseTime, setAvgResponseTime] = useState(0);
 
 
   // Guides state
@@ -758,6 +804,55 @@ const RetroChatBridge = () => {
     messagesEndRef?.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Detect iFrame embedding and set up postMessage communication
+  useEffect(() => {
+    const embedded = window.self !== window.top;
+    setIsEmbedded(embedded);
+
+    // Listen for messages from parent
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'setCompactMode') {
+        setCompactMode(event.data.value);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Notify parent that we're ready
+    if (embedded) {
+      window.parent.postMessage({ type: 'chatBridgeReady' }, '*');
+    }
+
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  // Calculate aggregate metrics when messages change
+  useEffect(() => {
+    const messagesWithTokens = messages.filter(msg => msg.tokens !== undefined);
+    const messagesWithTime = messages.filter(msg => msg.response_time !== undefined);
+
+    const tokens = messagesWithTokens.reduce((sum, msg) => sum + (msg.tokens || 0), 0);
+    const avgTime = messagesWithTime.length > 0
+      ? messagesWithTime.reduce((sum, msg) => sum + (msg.response_time || 0), 0) / messagesWithTime.length
+      : 0;
+
+    setTotalTokens(tokens);
+    setAvgResponseTime(avgTime);
+
+    // Send metrics to parent if embedded
+    if (isEmbedded) {
+      window.parent.postMessage({
+        type: 'metricsUpdate',
+        data: {
+          totalTokens: tokens,
+          avgResponseTime: avgTime,
+          messageCount: messages.length,
+          conversationStatus,
+        },
+      }, '*');
+    }
+  }, [messages, isEmbedded, conversationStatus]);
+
   const closeModal = useCallback(() => {
     setIsModalOpen(false);
     if (modalType === 'settings') {
@@ -944,45 +1039,59 @@ const RetroChatBridge = () => {
   );
 
   return (
-    <div className="min-h-screen bg-win-gray-100 font-sans">
+    <div className={`min-h-screen bg-win-gray-100 font-sans ${compactMode ? 'compact-mode' : ''}`}>
       {/* Retro frame */}
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-10">
+      <div className={`mx-auto flex min-h-screen w-full flex-col gap-8 ${compactMode ? 'max-w-full px-2 py-2' : 'max-w-6xl px-4 py-10'}`}>
         {/* Title bar */}
-        <header className="flex flex-col gap-4 border-b-2 border-win-gray-400 bg-win-gray-300 px-4 py-2 shadow-md">
+        <header className={`flex flex-col gap-4 border-b-2 border-win-gray-400 bg-win-gray-300 px-4 shadow-md ${compactMode ? 'py-1' : 'py-2'}`}>
           <div className="flex flex-row items-center justify-between">
             <div className="flex items-center gap-3">
               <span role="img" aria-label="spark" className="text-xl">🎵</span>
               <h1 className="text-xl font-bold text-win-gray-800">Chat Bridge Studio</h1>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setModalType('guides');
-                  setIsModalOpen(true);
-                  setSelectedGuide(null);
-                }}
-                className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
-                title="View guides and documentation"
-              >
-                📚 Help
-              </button>
-              <button
-                type="button"
-                onClick={() => openModal('settings')}
-                className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
-                title="Configure API Keys"
-              >
-                🔑 Keys
-              </button>
-              <button
-                type="button"
-                onClick={() => openModal('personas')}
-                className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
-                title="Manage personas in roles.json"
-              >
-                🎭 Personas
-              </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              {!compactMode && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalType('guides');
+                      setIsModalOpen(true);
+                      setSelectedGuide(null);
+                    }}
+                    className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
+                    title="View guides and documentation"
+                  >
+                    📚 Help
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openModal('settings')}
+                    className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
+                    title="Configure API Keys"
+                  >
+                    🔑 Keys
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openModal('personas')}
+                    className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-4 py-2 text-sm font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
+                    title="Manage personas in roles.json"
+                  >
+                    🎭 Personas
+                  </button>
+                </>
+              )}
+              {isEmbedded && (
+                <button
+                  type="button"
+                  onClick={() => setCompactMode(!compactMode)}
+                  className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 px-3 py-1 text-xs font-semibold text-win-gray-800 shadow-inner shadow-win-gray-300 transition hover:border-win-gray-600 hover:bg-win-gray-300"
+                  title={compactMode ? 'Expand view' : 'Compact view'}
+                >
+                  {compactMode ? '🔲 Expand' : '📐 Compact'}
+                </button>
+              )}
               {conversationId && (
                 <button
                   type="button"
@@ -1022,12 +1131,22 @@ const RetroChatBridge = () => {
           <p className="text-sm text-win-gray-600">{STATUS_COPY[conversationStatus].description}</p>
         </header>
 
-        <ProviderStatusIndicator 
-          providerStatus={providerStatus} 
-          isLoading={isLoadingProviderStatus} 
+        {!compactMode && (
+          <ProviderStatusIndicator
+            providerStatus={providerStatus}
+            isLoading={isLoadingProviderStatus}
+          />
+        )}
+
+        <MetricsPanel
+          totalTokens={totalTokens}
+          avgResponseTime={avgResponseTime}
+          messageCount={messages.length}
+          conversationStatus={conversationStatus}
         />
 
-        <div className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 p-4 shadow-inner shadow-win-gray-500">
+        {!compactMode && (
+          <div className="rounded-lg border-2 border-win-gray-400 bg-win-gray-200 p-4 shadow-inner shadow-win-gray-500">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-win-gray-800">LLM test bench</h3>
@@ -1101,11 +1220,13 @@ const RetroChatBridge = () => {
             })}
           </div>
         </div>
+        )}
 
         {banner && <Banner banner={banner} onClose={() => setBanner(null)} />}
 
-        <div className="grid flex-1 gap-6 lg:grid-cols-[360px,1fr]">
+        <div className={`grid flex-1 gap-6 ${compactMode ? 'grid-cols-1' : 'lg:grid-cols-[360px,1fr]'}`}>
           {/* Configuration panel - styled like a retro dialog box */}
+          {!compactMode && (
           <aside className="space-y-6 rounded-lg border-2 border-win-gray-400 bg-win-gray-200 p-4 shadow-inner shadow-win-gray-500">
             <h2 className="text-lg font-semibold text-win-gray-800">Agent configuration</h2>
             <p className="text-sm text-win-gray-600">Select personas, providers, and temperatures to craft the perfect dialogue.</p>
@@ -1211,6 +1332,7 @@ const RetroChatBridge = () => {
               </div>
             </div>
           </aside>
+          )}
 
           {/* Chat area with window styling */}
           <section className="flex flex-col rounded-lg border-2 border-win-gray-400 bg-win-gray-100 shadow-inner shadow-win-gray-500">
@@ -1281,6 +1403,30 @@ const RetroChatBridge = () => {
                       <span>{formatTimestamp(message.timestamp)}</span>
                     </header>
                     <p className={`mt-2 whitespace-pre-wrap text-sm ${textColor}`}>{message.content}</p>
+
+                    {/* Info tags for metrics */}
+                    {(message.tokens || message.response_time || message.model) && (
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        {message.tokens && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-win-gray-400 bg-win-gray-100 px-2 py-0.5 text-win-gray-700">
+                            <span className="text-xs">🔢</span>
+                            <span>{message.tokens} tokens</span>
+                          </span>
+                        )}
+                        {message.response_time && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-win-gray-400 bg-win-gray-100 px-2 py-0.5 text-win-gray-700">
+                            <span className="text-xs">⏱️</span>
+                            <span>{message.response_time.toFixed(2)}s</span>
+                          </span>
+                        )}
+                        {message.model && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-win-gray-400 bg-win-gray-100 px-2 py-0.5 text-win-gray-700 max-w-[200px] truncate">
+                            <span className="text-xs">🤖</span>
+                            <span className="truncate">{message.model}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </article>
                 );
               })}

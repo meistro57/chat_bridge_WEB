@@ -24,6 +24,9 @@ export interface Message {
   sender: 'user' | 'agent_a' | 'agent_b';
   timestamp: string;
   persona?: string;
+  tokens?: number;
+  response_time?: number;
+  model?: string;
 }
 
 export interface Model {
