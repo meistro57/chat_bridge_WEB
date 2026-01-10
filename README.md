@@ -32,11 +32,26 @@ docker build -t chat-bridge-frontend -f frontend/Dockerfile .
 
 ## 🛠 Features
 
+### Core Features
 - ✅ **API Key GUI**: Configure your provider keys directly in the browser via the "Keys" modal.
 - ✅ **Retro Design**: Classic beveled buttons, gray color schemes, and nostalgic aesthetic.
 - ✅ **Real-time Streaming**: AI conversation streaming via WebSockets.
 - ✅ **Smart Port Detection**: Automatically avoids port conflicts with host or Docker processes.
 - ✅ **Compatibility Patch**: Includes a built-in launcher to resolve FastAPI/Starlette version mismatches.
+
+### 🎯 NEW: iFrame & Metrics Enhancements
+
+Perfect for embedding in websites like **quantummindsunited.com**!
+
+- 📊 **Real-time Metrics**: Token usage, response times, and cost estimates displayed on every message
+- 🎨 **Compact Mode**: Streamlined UI optimized for embedded views
+- 📡 **PostMessage API**: Two-way communication between parent page and Chat Bridge
+- 🔲 **Auto iFrame Detection**: Automatically enables iFrame-optimized features
+- 💰 **Cost Tracking**: Estimated API costs based on token usage
+- ⚡ **Performance Insights**: Individual message timing and aggregate statistics
+- 🎭 **Enlightening UX**: Beautiful info tags showing tokens, response time, and model used
+
+See [IFRAME_GUIDE.md](./IFRAME_GUIDE.md) for complete integration documentation and [iframe-demo.html](./iframe-demo.html) for a working example.
 
 ## 📁 Project Structure
 

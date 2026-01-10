@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Bridge iFrame Demo - Quantum Minds United</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 24px;
+      border-radius: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 1.1rem;
+    }
+
+    .iframe-wrapper {
+      background: white;
+      border-radius: 16px;
+      padding: 8px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+      height: calc(100vh - 200px);
+      min-height: 600px;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      border-radius: 12px;
+    }
+
+    .metrics-panel {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 20px;
+      border-radius: 16px;
+      margin-top: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    .metrics-panel h3 {
+      font-size: 1.2rem;
+      margin-bottom: 12px;
+      color: #333;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .metric-card {
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      padding: 16px;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .metric-label {
+      font-size: 0.875rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 1.75rem;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: pulse 2s infinite;
+    }
+
+    .status-indicator.ready {
+      background: #10b981;
+    }
+
+    .status-indicator.waiting {
+      background: #f59e0b;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    .info-banner {
+      background: rgba(16, 185, 129, 0.1);
+      border-left: 4px solid #10b981;
+      padding: 16px;
+      border-radius: 8px;
+      margin-top: 12px;
+      color: #065f46;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧠 Quantum Minds United</h1>
+      <p class="subtitle">Advanced AI Conversation Platform - Powered by Chat Bridge</p>
+      <div class="controls" style="margin-top: 16px;">
+        <button onclick="toggleCompactMode()">📐 Toggle Compact Mode</button>
+        <button onclick="refreshMetrics()">🔄 Refresh Metrics</button>
+        <span style="color: #666; display: flex; align-items: center; padding: 0 12px;">
+          <span class="status-indicator waiting" id="statusIndicator"></span>
+          <span id="statusText">Initializing...</span>
+        </span>
+      </div>
+      <div class="info-banner" id="infoBanner" style="display: none;">
+        📡 Connected to Chat Bridge - Metrics streaming in real-time
+      </div>
+    </header>
+
+    <div class="iframe-wrapper">
+      <iframe
+        id="chatBridgeFrame"
+        src="http://localhost:5173"
+        title="Chat Bridge Studio"
+        allow="clipboard-write"
+      ></iframe>
+    </div>
+
+    <div class="metrics-panel">
+      <h3>📊 Real-time Metrics</h3>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Total Messages</div>
+          <div class="metric-value" id="messageCount">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Total Tokens</div>
+          <div class="metric-value" id="totalTokens">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Avg Response Time</div>
+          <div class="metric-value" id="avgResponseTime">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Status</div>
+          <div class="metric-value" id="conversationStatus" style="font-size: 1.25rem;">idle</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const iframe = document.getElementById('chatBridgeFrame');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const infoBanner = document.getElementById('infoBanner');
+    let isCompactMode = false;
+
+    // Listen for messages from the iFrame
+    window.addEventListener('message', (event) => {
+      // In production, verify event.origin for security
+      // if (event.origin !== 'http://localhost:5173') return;
+
+      const { type, data } = event.data;
+
+      switch (type) {
+        case 'chatBridgeReady':
+          console.log('Chat Bridge is ready!');
+          statusIndicator.classList.remove('waiting');
+          statusIndicator.classList.add('ready');
+          statusText.textContent = 'Connected';
+          infoBanner.style.display = 'block';
+          break;
+
+        case 'metricsUpdate':
+          console.log('Metrics update:', data);
+          updateMetrics(data);
+          break;
+
+        default:
+          console.log('Unknown message type:', type);
+      }
+    });
+
+    function updateMetrics(data) {
+      document.getElementById('messageCount').textContent = data.messageCount || 0;
+      document.getElementById('totalTokens').textContent = (data.totalTokens || 0).toLocaleString();
+      document.getElementById('avgResponseTime').textContent =
+        data.avgResponseTime ? `${data.avgResponseTime.toFixed(2)}s` : '-';
+      document.getElementById('conversationStatus').textContent = data.conversationStatus || 'idle';
+    }
+
+    function toggleCompactMode() {
+      isCompactMode = !isCompactMode;
+      iframe.contentWindow.postMessage({
+        type: 'setCompactMode',
+        value: isCompactMode
+      }, '*');
+      console.log('Compact mode:', isCompactMode);
+    }
+
+    function refreshMetrics() {
+      console.log('Refreshing metrics...');
+      // The metrics will update automatically via postMessage
+      alert('Metrics update automatically! Watch the panel below.');
+    }
+
+    // Log when iframe loads
+    iframe.addEventListener('load', () => {
+      console.log('Chat Bridge iFrame loaded successfully');
+    });
+  </script>
+</body>
+</html>

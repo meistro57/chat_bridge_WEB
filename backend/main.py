@@ -25,6 +25,11 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count (rough approximation: ~4 chars per token)"""
+    return max(1, len(text) // 4)
+
 BASE_DIR = Path(__file__).parent.parent.resolve()
 SHARED_ENV_PATH = BASE_DIR.parent / "chat_bridge" / ".env"
 
@@ -131,6 +136,9 @@ class Message(BaseModel):
     sender: str  # 'user', 'agent_a', 'agent_b'
     timestamp: datetime
     persona: Optional[str] = None
+    tokens: Optional[int] = None
+    response_time: Optional[float] = None
+    model: Optional[str] = None
 
 
 class Conversation:
@@ -934,18 +942,25 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
             try:
                 turn_counter += 1
 
-                # Agent A response
+                # Agent A response with timing
+                start_time = asyncio.get_event_loop().time()
                 context = [
                     msg.content for msg in conversation.messages[-conversation.request.mem_rounds :]
                 ]
                 response_a = await current_agent.generate_response(
                     " ".join(context), conversation.request.mem_rounds
                 )
+                response_time_a = asyncio.get_event_loop().time() - start_time
+                tokens_a = estimate_tokens(response_a)
+
                 message_a = Message(
                     content=response_a,
                     sender="agent_a",
                     timestamp=datetime.now(),
                     persona=getattr(conversation.request, "persona_a", None),
+                    tokens=tokens_a,
+                    response_time=response_time_a,
+                    model=conversation.request.model_a,
                 )
                 conversation.messages.append(message_a)
                 await websocket.send_json(
@@ -956,13 +971,17 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
                             "sender": "agent_a",
                             "timestamp": message_a.timestamp.isoformat(),
                             "persona": message_a.persona,
+                            "tokens": tokens_a,
+                            "response_time": round(response_time_a, 2),
+                            "model": conversation.request.model_a,
                         },
                     }
                 )
 
                 await asyncio.sleep(0.05)
 
-                # Agent B response
+                # Agent B response with timing
+                start_time = asyncio.get_event_loop().time()
                 current_agent = conversation.agent_b
                 context = [
                     msg.content for msg in conversation.messages[-conversation.request.mem_rounds :]
@@ -970,11 +989,17 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
                 response_b = await current_agent.generate_response(
                     " ".join(context), conversation.request.mem_rounds
                 )
+                response_time_b = asyncio.get_event_loop().time() - start_time
+                tokens_b = estimate_tokens(response_b)
+
                 message_b = Message(
                     content=response_b,
                     sender="agent_b",
                     timestamp=datetime.now(),
                     persona=getattr(conversation.request, "persona_b", None),
+                    tokens=tokens_b,
+                    response_time=response_time_b,
+                    model=conversation.request.model_b,
                 )
                 conversation.messages.append(message_b)
                 await websocket.send_json(
@@ -985,6 +1010,9 @@ async def websocket_conversation(websocket: WebSocket, conversation_id: str):
                             "sender": "agent_b",
                             "timestamp": message_b.timestamp.isoformat(),
                             "persona": message_b.persona,
+                            "tokens": tokens_b,
+                            "response_time": round(response_time_b, 2),
+                            "model": conversation.request.model_b,
                         },
                     }
                 )
