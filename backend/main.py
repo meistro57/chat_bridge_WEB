@@ -21,10 +21,33 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-BASE_DIR = Path(__file__).parent.parent.resolve()
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file
-load_dotenv(dotenv_path=BASE_DIR / ".env")
+BASE_DIR = Path(__file__).parent.parent.resolve()
+SHARED_ENV_PATH = BASE_DIR.parent / "chat_bridge" / ".env"
+
+def _coerce_env_flag(value: Optional[str]) -> bool:
+    """Convert environment flag strings into booleans."""
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_environment() -> None:
+    """Load environment variables from configured .env files."""
+    load_dotenv(dotenv_path=BASE_DIR / ".env")
+    if _coerce_env_flag(os.getenv("CHAT_BRIDGE_USE_SHARED_ENV")):
+        if SHARED_ENV_PATH.exists():
+            load_dotenv(dotenv_path=SHARED_ENV_PATH)
+            logger.info("Loaded shared environment from %s", SHARED_ENV_PATH)
+        else:
+            logger.warning("Shared environment requested but not found at %s", SHARED_ENV_PATH)
+
+
+# Load environment variables from .env files
+_load_environment()
 
 # Import Chat Bridge functionality
 sys.path.insert(0, str(BASE_DIR))
@@ -37,10 +60,6 @@ from bridge_agents import (  # noqa: E402, I001
     ensure_credentials,
     resolve_model,
 )
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Chat Bridge Web API",
