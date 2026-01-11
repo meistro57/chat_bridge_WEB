@@ -164,6 +164,45 @@ class BackendIntegrationTests(unittest.TestCase):
             self.assertIn("content", response.json())
             self.assertEqual(response.json()["guide_id"], "getting-started")
 
+    def test_create_conversation_uses_request_models(self):
+        mock_bridge.resolve_model.reset_mock()
+        mock_bridge.create_agent.reset_mock()
+        original_side_effect = mock_bridge.resolve_model.side_effect
+        original_return_value = mock_bridge.resolve_model.return_value
+
+        def resolve_side_effect(provider, model=None):
+            return model or f"{provider}-default"
+
+        mock_bridge.resolve_model.side_effect = resolve_side_effect
+
+        payload = {
+            "provider_a": "openai",
+            "provider_b": "anthropic",
+            "model_a": "gpt-4o-mini",
+            "model_b": "claude-3-5-sonnet-20241022",
+            "starter_message": "Model check",
+            "max_rounds": 1,
+        }
+
+        response = self.client.post("/api/conversations", json=payload)
+        self.assertEqual(response.status_code, 200)
+
+        conv_id = response.json()["conversation_id"]
+        import backend.main as main
+
+        conversation = main.conversations[conv_id]
+        self.assertEqual(conversation.request.model_a, "gpt-4o-mini")
+        self.assertEqual(conversation.request.model_b, "claude-3-5-sonnet-20241022")
+
+        self.assertGreaterEqual(mock_bridge.create_agent.call_count, 2)
+        agent_a_call = mock_bridge.create_agent.call_args_list[0].args
+        agent_b_call = mock_bridge.create_agent.call_args_list[1].args
+        self.assertEqual(agent_a_call[2], "gpt-4o-mini")
+        self.assertEqual(agent_b_call[2], "claude-3-5-sonnet-20241022")
+
+        mock_bridge.resolve_model.side_effect = original_side_effect
+        mock_bridge.resolve_model.return_value = original_return_value
+
 
 if __name__ == "__main__":
     unittest.main()
