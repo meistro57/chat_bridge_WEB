@@ -19,7 +19,7 @@ import httpx
 from dotenv import load_dotenv, set_key
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -94,6 +94,8 @@ class PersonaConfig(BaseModel):
 
 
 class ConversationRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     persona_a: Optional[str] = None
     persona_b: Optional[str] = None
     provider_a: str
@@ -251,10 +253,11 @@ class Conversation:
             )
             temp_a = (
                 persona_a_config.temperature
-                if persona_a_config.temperature
+                if persona_a_config.temperature is not None
                 else self.request.temperature_a
             )
-            model_a = resolve_model(provider_a, persona_a_config.model)
+            persona_model_a = persona_a_config.model or self.request.model_a
+            model_a = resolve_model(provider_a, persona_model_a)
             system_a = (
                 persona_a_config.system_prompt
                 if persona_a_config.system_prompt
@@ -263,7 +266,7 @@ class Conversation:
         else:
             provider_a = self.request.provider_a
             temp_a = self.request.temperature_a
-            model_a = resolve_model(provider_a, None)
+            model_a = resolve_model(provider_a, self.request.model_a)
             system_a = get_spec(provider_a).default_system
 
         # Resolve configurations for Agent B
@@ -278,10 +281,11 @@ class Conversation:
             )
             temp_b = (
                 persona_b_config.temperature
-                if persona_b_config.temperature
+                if persona_b_config.temperature is not None
                 else self.request.temperature_b
             )
-            model_b = resolve_model(provider_b, persona_b_config.model)
+            persona_model_b = persona_b_config.model or self.request.model_b
+            model_b = resolve_model(provider_b, persona_model_b)
             system_b = (
                 persona_b_config.system_prompt
                 if persona_b_config.system_prompt
@@ -290,7 +294,7 @@ class Conversation:
         else:
             provider_b = self.request.provider_b
             temp_b = self.request.temperature_b
-            model_b = resolve_model(provider_b, None)
+            model_b = resolve_model(provider_b, self.request.model_b)
             system_b = get_spec(provider_b).default_system
 
         # Ensure credentials (raises RuntimeError when missing)
@@ -313,6 +317,9 @@ class Conversation:
             temp_b,
             system_b,
         )
+
+        self.request.model_a = model_a
+        self.request.model_b = model_b
 
         logger.info(
             f"Agents initialized with personas {self.request.persona_a or 'default'} vs {self.request.persona_b or 'default'}"
