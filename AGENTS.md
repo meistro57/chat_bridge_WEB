@@ -8,7 +8,8 @@ Chat Bridge Web is a modern web interface for the Chat Bridge AI conversation pl
 
 ### Tech Stack
 
-- **Backend**: FastAPI (Python 3.11+)
+- **AI Engine**: FastAPI (Python 3.11+)
+- **Platform Layer**: Laravel 10+ (PHP 8.2+)
 - **Frontend**: React 18, Vite, TypeScript, Tailwind CSS
 - **Real-time**: WebSockets for live conversation streaming
 - **Environment**: Custom orchestration with auto-port detection and version patching.
@@ -17,7 +18,8 @@ Chat Bridge Web is a modern web interface for the Chat Bridge AI conversation pl
 
 ```text
 chat_bridge_WEB/
-├── backend/            # FastAPI application
+├── backend/            # FastAPI AI Engine
+├── laravel-backend/    # Laravel Platform (History, Auth, Persistence)
 ├── frontend/           # React application
 ├── dev_start.sh        # Orchestration script (Primary entry point)
 ├── launcher.py         # Monkeypatched backend runner
@@ -44,6 +46,13 @@ The project uses `dev_start.sh` to manage backend/frontend lifecycles simultaneo
 - **Build**: `npm run build`
 
 ## Architecture & Integration
+
+### Hybrid Architecture (Laravel + Python)
+The system uses a hybrid approach where Laravel serves as the primary platform layer (persistence, auth, history) while delegating actual LLM interactions to the Python engine.
+- **Frontend** talks to **Laravel** (Port 8001 typically).
+- **Laravel** talks to **Python Backend** (Port 8000) via HTTP.
+- **Python Backend** talks to **LLM Providers**.
+- **WebSockets** are broadcast from Laravel.
 
 ### The Middleware Monkeypatch (`launcher.py`)
 The environment has a version conflict: **FastAPI 0.104.1** + **Starlette 0.50.0**. Starlette 0.50 changed internal middleware representations from 2-tuples to 3-tuples, which crashes older FastAPI.

@@ -1,0 +1,11 @@
+{
+    "autoload": {
+        "psr-4": {
+            "App\\\\": "app\/"
+        }
+    },
+    "require": {
+        "tymon/jwt-auth": "^2.2",
+        "guzzlehttp/guzzle": "^7.10"
+    }
+}

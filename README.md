@@ -38,6 +38,7 @@ docker build -t chat-bridge-frontend -f frontend/Dockerfile .
 - ✅ **Real-time Streaming**: AI conversation streaming via WebSockets.
 - ✅ **Smart Port Detection**: Automatically avoids port conflicts with host or Docker processes.
 - ✅ **Compatibility Patch**: Includes a built-in launcher to resolve FastAPI/Starlette version mismatches.
+- ✅ **Laravel Persistence**: Optional PHP backend for conversation history and user management.
 
 ### 🎯 NEW: iFrame & Metrics Enhancements
 
@@ -61,6 +62,9 @@ chat_bridge_WEB/
 │   ├── main.py         # API entry point
 │   ├── requirements.txt
 │   └── tests/          # Integration tests
+├── laravel-backend/    # NEW: Hybrid platform layer (PHP)
+│   ├── app/            # Controllers & Services
+│   └── routes/         # API wrappers
 ├── frontend/           # React + Vite application
 │   ├── src/            # App components and types
 │   └── package.json
@@ -85,6 +89,15 @@ Use these tags to quickly locate common workflows and scripts:
 Tests include automatic monkeypatching for the environment:
 ```bash
 /home/mark/chat_bridge/venv/bin/python3 backend/tests/integration_test.py
+```
+
+### Laravel Backend
+To run the Laravel hybrid layer:
+```bash
+cd laravel-backend
+# Ensure .env exists and database/database.sqlite is created
+php artisan migrate
+php artisan serve --port 8001
 ```
 
 ### Full Stack Smoke Test
