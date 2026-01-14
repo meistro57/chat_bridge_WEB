@@ -7,3 +7,7 @@
 *.log
 transcripts/
 logs/
+
+# GitHub workflows (must be created manually via GitHub UI due to permissions)
+# Templates are available in docs/github-workflows/
+.github/workflows/
