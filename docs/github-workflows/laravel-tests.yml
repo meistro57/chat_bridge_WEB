@@ -1,0 +1,88 @@
+name: Laravel Tests
+
+on:
+  push:
+    branches: [ main, develop, 'claude/**' ]
+    paths:
+      - 'laravel-backend/**'
+      - '.github/workflows/laravel-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'laravel-backend/**'
+      - '.github/workflows/laravel-tests.yml'
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        php-version: ['8.1', '8.2', '8.3']
+
+    name: PHP ${{ matrix.php-version }} Laravel Tests
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php-version }}
+        extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv
+        coverage: xdebug
+
+    - name: Get Composer Cache Directory
+      id: composer-cache
+      run: |
+        echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+      working-directory: ./laravel-backend
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.composer-cache.outputs.dir }}
+        key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-composer-
+
+    - name: Install Composer dependencies
+      run: composer install --prefer-dist --no-progress --no-suggest --no-interaction
+      working-directory: ./laravel-backend
+
+    - name: Copy .env file
+      run: |
+        cp .env.example .env || echo "APP_ENV=testing
+        APP_DEBUG=true
+        APP_KEY=base64:test-key-for-ci
+        DB_CONNECTION=sqlite
+        DB_DATABASE=:memory:
+        PYTHON_BACKEND_URL=http://localhost:8000
+        JWT_SECRET=test-jwt-secret-key" > .env
+      working-directory: ./laravel-backend
+
+    - name: Generate application key
+      run: php artisan key:generate
+      working-directory: ./laravel-backend
+
+    - name: Run database migrations
+      run: php artisan migrate --force
+      working-directory: ./laravel-backend
+
+    - name: Execute tests
+      run: vendor/bin/phpunit --testdox --colors=always
+      working-directory: ./laravel-backend
+
+    - name: Generate test coverage
+      if: matrix.php-version == '8.2'
+      run: vendor/bin/phpunit --coverage-clover coverage.xml
+      working-directory: ./laravel-backend
+
+    - name: Upload coverage to Codecov
+      if: matrix.php-version == '8.2'
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./laravel-backend/coverage.xml
+        flags: laravel
+        name: laravel-coverage
