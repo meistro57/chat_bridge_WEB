@@ -29,6 +29,7 @@ type ConversationStatus = 'idle' | 'configuring' | 'running' | 'finished' | 'err
 
 const DEFAULT_PROVIDER_OPTIONS: ProviderOption[] = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'autogen', label: 'AutoGen' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'deepseek', label: 'DeepSeek' },

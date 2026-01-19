@@ -821,6 +821,14 @@ async def get_models(provider: str):
                 {"id": "gpt-4", "name": "GPT-4"},
                 {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
             ]
+        elif provider == "autogen":
+            models = [
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+                {"id": "gpt-4o", "name": "GPT-4o"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
+            ]
         elif provider == "anthropic":
             models = [
                 {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
