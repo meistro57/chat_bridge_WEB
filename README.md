@@ -14,6 +14,13 @@ chmod +x dev_start.sh
 ./dev_start.sh
 ```
 
+If you prefer a thin wrapper that ensures the main script is executable:
+
+```bash
+# From project root
+./startup.sh
+```
+
 - **Backend**: Usually `http://localhost:8000`
 - **Frontend**: Usually `http://localhost:5173`
 - **Port Swapping**: If ports are in use (including by Docker), the script automatically picks the next available ones.
@@ -79,7 +86,9 @@ Use these tags to quickly locate common workflows and scripts:
 
 - `tests:integration` → `backend/tests/integration_test.py`
 - `tests:smoke` → `smoke_test.py`
+- `tests:lint` → `lint.sh`
 - `dev:fullstack` → `dev_start.sh`
+- `dev:wrapper` → `startup.sh`
 - `dev:backend` → `launcher.py`
 - `dev:frontend` → `frontend/` (`npm run dev`)
 
@@ -104,6 +113,12 @@ php artisan serve --port 8001
 Verify the entire running environment:
 ```bash
 /home/mark/chat_bridge/venv/bin/python3 smoke_test.py
+```
+
+### Linting (Backend + Frontend)
+Run Ruff and ESLint together:
+```bash
+./lint.sh
 ```
 
 ## 🔐 API Configuration

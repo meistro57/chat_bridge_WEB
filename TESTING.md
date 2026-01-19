@@ -176,6 +176,14 @@ npm test
 npm test -- --coverage
 ```
 
+## Linting
+
+Use the combined lint script to run Ruff for the Python backend and ESLint for the frontend:
+
+```bash
+./lint.sh
+```
+
 ## CI/CD Integration
 
 ### GitHub Actions Workflows
@@ -364,6 +372,6 @@ For questions about testing or to report issues:
 
 ---
 
-**Last Updated**: 2026-01-14
+**Last Updated**: 2026-01-19
 **Test Suite Version**: 1.0.0
 **Total Test Cases**: 86+ (71 Laravel + 15 Python)
